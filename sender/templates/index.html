@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Email Sender</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #f0f2f5;
+      --surface: #ffffff;
+      --border:  #e4e6ea;
+      --text:    #1a1a2e;
+      --muted:   #6b7280;
+      --blue:    #1e88e5;
+      --green:   #2e7d32;
+      --red:     #c62828;
+      --orange:  #e65100;
+    }
+
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Layout ── */
+    header { background: var(--surface); border-bottom: 1px solid var(--border);
+             padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    .stat-chip { background: var(--bg); border-radius: 20px; padding: 4px 14px;
+                 font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+    .stat-chip.green { background: #e8f5e9; color: var(--green); }
+    .stat-chip.orange { background: #fff3e0; color: var(--orange); }
+
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border);
+            background: var(--surface); padding: 0 32px; }
+    .tab { padding: 14px 20px; cursor: pointer; font-size: 0.9rem; font-weight: 600;
+           color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px;
+           transition: color .15s, border-color .15s; }
+    .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    .page { display: none; padding: 32px; max-width: 960px; margin: 0 auto; }
+    .page.active { display: block; }
+
+    /* ── Cards ── */
+    .card { background: var(--surface); border-radius: 14px; padding: 24px 28px;
+            box-shadow: 0 1px 8px rgba(0,0,0,.06); margin-bottom: 20px; }
+    .card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; color: var(--text); }
+
+    /* ── Form ── */
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--muted);
+                   margin-bottom: 5px; text-transform: uppercase; letter-spacing: .05em; }
+    .field input, .field textarea {
+      width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+      font-size: 0.92rem; color: var(--text); background: #fafafa; outline: none;
+      font-family: inherit; transition: border-color .15s; }
+    .field input:focus, .field textarea:focus { border-color: var(--blue); background: #fff; }
+    .field textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
+    .field .hint { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+    .pass-wrap { position: relative; }
+    .pass-wrap input { padding-right: 44px; }
+    .pass-wrap button { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+                        background: none; border: none; cursor: pointer; color: var(--muted);
+                        font-size: 0.8rem; padding: 4px 6px; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    /* ── Buttons ── */
+    .btn { border: none; border-radius: 10px; padding: 11px 22px; font-size: 0.92rem;
+           font-weight: 600; cursor: pointer; transition: background .15s, opacity .15s; }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-primary:hover { background: #1565c0; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-secondary { background: var(--bg); color: var(--text); }
+    .btn-secondary:hover { background: #e4e6ea; }
+    .btn-danger { background: #fdecea; color: var(--red); }
+    .btn-send { background: var(--green); color: #fff; font-size: 1rem;
+                padding: 14px 36px; border-radius: 12px; width: 100%; }
+    .btn-send:hover { background: #1b5e20; }
+    .btn-send:disabled { background: #c8e6c9; cursor: not-allowed; }
+
+    /* ── CV upload ── */
+    .drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 32px;
+                 text-align: center; color: var(--muted); cursor: pointer;
+                 transition: border-color .15s, background .15s; }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--blue); background: #e3f2fd22; }
+    .drop-zone input { display: none; }
+    .drop-zone .icon { font-size: 2rem; margin-bottom: 8px; }
+    .drop-zone p { font-size: 0.88rem; }
+    .drop-zone p strong { color: var(--blue); }
+
+    /* ── Preview ── */
+    .preview-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .ptab { padding: 6px 16px; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
+            cursor: pointer; background: var(--bg); color: var(--muted); border: none; }
+    .ptab.active { background: var(--blue); color: #fff; }
+
+    .email-preview { background: #fafafa; border: 1px solid var(--border); border-radius: 10px;
+                     padding: 20px 24px; font-size: 0.88rem; line-height: 1.7; }
+    .email-preview .subject { font-weight: 700; margin-bottom: 12px; color: var(--text);
+                               font-size: 0.92rem; }
+    .email-preview .body { color: #333; white-space: pre-wrap; }
+
+    /* ── Stats ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+                  margin-bottom: 24px; }
+    .stat-box { background: var(--surface); border-radius: 12px; padding: 20px;
+                box-shadow: 0 1px 8px rgba(0,0,0,.06); text-align: center; }
+    .stat-box .val { font-size: 2rem; font-weight: 700; }
+    .stat-box .lbl { font-size: 0.78rem; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: .06em; margin-top: 4px; }
+    .stat-box.blue  .val { color: var(--blue); }
+    .stat-box.green .val { color: var(--green); }
+    .stat-box.red   .val { color: var(--red); }
+    .stat-box.gray  .val { color: var(--muted); }
+
+    /* ── Countdown ── */
+    .countdown-box { background: #fff8e1; border: 1px solid #ffe082; border-radius: 12px;
+                     padding: 20px 28px; text-align: center; margin-bottom: 20px; }
+    .countdown-box .cd-label { font-size: 0.82rem; color: var(--orange); font-weight: 700;
+                                text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .countdown-box .cd-time { font-size: 2.4rem; font-weight: 700; color: var(--orange);
+                               font-variant-numeric: tabular-nums; letter-spacing: .05em; }
+
+    /* ── Progress bar ── */
+    .progress-wrap { display: none; margin-bottom: 20px; }
+    .progress-wrap.active { display: block; }
+    .progress-bar-bg { background: var(--bg); border-radius: 999px; height: 10px;
+                       overflow: hidden; margin-bottom: 8px; }
+    .progress-bar-fill { height: 100%; background: var(--green); border-radius: 999px;
+                         transition: width .4s; }
+    .progress-meta { font-size: 0.82rem; color: var(--muted); display: flex; justify-content: space-between; }
+
+    /* ── Alert ── */
+    .alert { border-radius: 10px; padding: 12px 16px; font-size: 0.88rem; margin-bottom: 16px;
+             display: none; }
+    .alert.active { display: block; }
+    .alert.error { background: #fdecea; color: var(--red); border: 1px solid #f5c6c6; }
+    .alert.success { background: #e8f5e9; color: var(--green); border: 1px solid #c8e6c9; }
+    .alert.info { background: #e3f2fd; color: var(--blue); border: 1px solid #bbdefb; }
+
+    /* ── CV Fields extracted ── */
+    .extracted-fields { background: #f0f7ff; border: 1px solid #bbdefb; border-radius: 10px;
+                        padding: 16px 20px; margin-top: 14px; display: none; }
+    .extracted-fields.active { display: block; }
+    .extracted-fields h4 { font-size: 0.82rem; font-weight: 700; color: var(--blue);
+                            text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+    .ef-row { display: flex; gap: 8px; font-size: 0.85rem; padding: 4px 0; }
+    .ef-key { color: var(--muted); min-width: 160px; }
+    .ef-val { color: var(--text); font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Email Sender</h1>
+  <span class="stat-chip green" id="hdrSent">— sent</span>
+  <span class="stat-chip orange" id="hdrRemaining">— remaining</span>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('setup')">Setup</div>
+  <div class="tab" onclick="showTab('template')">Template</div>
+  <div class="tab" onclick="showTab('send')">Send</div>
+</div>
+
+<!-- ══════════════════════════════════ SETUP ══════════════════════════════════ -->
+<div class="page active" id="page-setup">
+
+  <div class="card">
+    <h2>Your Identity</h2>
+    <div class="row">
+      <div class="field">
+        <label>Full Name</label>
+        <input type="text" id="cfg_your_name" placeholder="Akrem Alamine" />
+      </div>
+      <div class="field">
+        <label>Gmail Address</label>
+        <input type="email" id="cfg_your_email" placeholder="you@gmail.com" />
+      </div>
+    </div>
+    <div class="field">
+      <label>Gmail App Password</label>
+      <div class="pass-wrap">
+        <input type="password" id="cfg_gmail_app_password" placeholder="xxxx xxxx xxxx xxxx" />
+        <button type="button" onclick="togglePass()">show</button>
+      </div>
+      <div class="hint">
+        Use an App Password, not your regular Gmail password.
+        <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--blue)">Create one here</a>
+        (requires 2-Step Verification enabled).
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Your CV</h2>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('cvFile').click()">
+      <input type="file" id="cvFile" accept=".pdf" onchange="uploadCV(this)" />
+      <div class="icon">📄</div>
+      <p><strong>Click to upload</strong> or drag & drop your CV (PDF)</p>
+      <p id="cvFilename" style="margin-top:6px;font-size:.8rem;color:var(--blue)"></p>
+    </div>
+    <div class="extracted-fields" id="extractedFields">
+      <h4>Extracted from CV</h4>
+      <div id="extractedList"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>CV Details <span style="font-size:.8rem;font-weight:400;color:var(--muted)">(auto-filled from CV, edit if needed)</span></h2>
+    <div class="row">
+      <div class="field">
+        <label>University</label>
+        <input type="text" id="cfg_your_university" placeholder="Your university" />
+      </div>
+      <div class="field">
+        <label>Graduation</label>
+        <input type="text" id="cfg_your_graduation" placeholder="June 2025" />
+      </div>
+    </div>
+    <div class="field">
+      <label>Internship Company</label>
+      <input type="text" id="cfg_your_internship_company" placeholder="Qleap Networks" />
+    </div>
+  </div>
+
+  <div id="setupAlert" class="alert"></div>
+  <button class="btn btn-primary" onclick="saveSetup()">Save Setup</button>
+</div>
+
+<!-- ══════════════════════════════════ TEMPLATE ══════════════════════════════ -->
+<div class="page" id="page-template">
+
+  <div class="card">
+    <h2>Email Template</h2>
+    <div class="field">
+      <label>Subject</label>
+      <input type="text" id="cfg_template_subject" />
+    </div>
+    <div class="field">
+      <label>Body</label>
+      <textarea id="cfg_template_body" rows="10"></textarea>
+      <div class="hint">
+        Variables: <code>{{greeting}}</code> (first name or "Company team"),
+        <code>{{company}}</code>, <code>{{your_name}}</code>, <code>{{your_email}}</code>,
+        <code>{{your_university}}</code>, <code>{{your_graduation}}</code>,
+        <code>{{your_internship_company}}</code>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:4px;">
+      <button class="btn btn-primary" onclick="saveTemplate()">Save Template</button>
+      <button class="btn btn-secondary" onclick="loadPreview()">Refresh Preview</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Preview</h2>
+    <div class="preview-tabs">
+      <button class="ptab active" onclick="switchPreview('with_name', this)">With name (Daniel)</button>
+      <button class="ptab" onclick="switchPreview('without_name', this)">Without name (company only)</button>
+    </div>
+    <div id="templateAlert" class="alert"></div>
+    <div class="email-preview" id="previewBox">
+      <div class="subject" id="prevSubject">Loading…</div>
+      <div class="body" id="prevBody"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════ SEND ══════════════════════════════════ -->
+<div class="page" id="page-send">
+
+  <div class="stats-grid">
+    <div class="stat-box blue">
+      <div class="val" id="statSendable">—</div>
+      <div class="lbl">Sendable</div>
+    </div>
+    <div class="stat-box green">
+      <div class="val" id="statSent">—</div>
+      <div class="lbl">Sent</div>
+    </div>
+    <div class="stat-box gray">
+      <div class="val" id="statRemaining">—</div>
+      <div class="lbl">Remaining</div>
+    </div>
+    <div class="stat-box red">
+      <div class="val" id="statFailed">—</div>
+      <div class="lbl">Failed</div>
+    </div>
+  </div>
+
+  <div class="countdown-box" id="countdownBox" style="display:none">
+    <div class="cd-label">Next batch available in</div>
+    <div class="cd-time" id="cdTime">—</div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+    </div>
+    <div class="progress-meta">
+      <span id="progressText">Sending…</span>
+      <span id="progressPct">0%</span>
+    </div>
+  </div>
+
+  <div id="sendAlert" class="alert"></div>
+
+  <button class="btn btn-send" id="sendBtn" onclick="sendBatch()">
+    Send Next 1,500 Emails
+  </button>
+</div>
+
+<script>
+  let _state = {};
+  let _previewData = {};
+  let _previewMode = "with_name";
+  let _countdownTimer = null;
+  let _cdRemaining = 0;
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  function showTab(name) {
+    document.querySelectorAll(".tab").forEach((t, i) => {
+      t.classList.toggle("active", ["setup","template","send"][i] === name);
+    });
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.getElementById("page-" + name).classList.add("active");
+    if (name === "template") loadPreview();
+    if (name === "send") refreshStats();
+  }
+
+  // ── Load state ─────────────────────────────────────────────────────────────
+  async function loadState() {
+    const res  = await fetch("/api/state");
+    _state     = await res.json();
+    const cfg  = _state.config || {};
+    const stat = _state.stats  || {};
+
+    // Fill setup fields
+    ["your_name","your_email","gmail_app_password",
+     "your_university","your_graduation","your_internship_company"]
+      .forEach(k => {
+        const el = document.getElementById("cfg_" + k);
+        if (el) el.value = cfg[k] || "";
+      });
+
+    // Fill template fields
+    const subj = document.getElementById("cfg_template_subject");
+    const body = document.getElementById("cfg_template_body");
+    if (subj) subj.value = cfg.template_subject || "";
+    if (body) body.value = cfg.template_body    || "";
+
+    // Header chips
+    document.getElementById("hdrSent").textContent      = (stat.sent      || 0).toLocaleString() + " sent";
+    document.getElementById("hdrRemaining").textContent = (stat.remaining || 0).toLocaleString() + " remaining";
+
+    // Stats page
+    document.getElementById("statSendable").textContent  = (stat.sendable  || 0).toLocaleString();
+    document.getElementById("statSent").textContent      = (stat.sent      || 0).toLocaleString();
+    document.getElementById("statRemaining").textContent = (stat.remaining || 0).toLocaleString();
+    document.getElementById("statFailed").textContent    = (stat.failed    || 0).toLocaleString();
+
+    // Cooldown
+    startCooldown(_state.cooldown_secs || 0);
+
+    // If a batch is running, start progress polling
+    if (_state.progress && _state.progress.running) {
+      watchProgress();
+    }
+  }
+
+  // ── Cooldown timer ─────────────────────────────────────────────────────────
+  function startCooldown(secs) {
+    _cdRemaining = secs;
+    const box = document.getElementById("countdownBox");
+    const btn = document.getElementById("sendBtn");
+
+    if (_countdownTimer) clearInterval(_countdownTimer);
+
+    if (secs <= 0) {
+      box.style.display = "none";
+      btn.disabled = false;
+      btn.textContent = "Send Next 1,500 Emails";
+      return;
+    }
+
+    box.style.display = "block";
+    btn.disabled = true;
+    btn.textContent = "Waiting for cooldown…";
+
+    _countdownTimer = setInterval(() => {
+      _cdRemaining--;
+      document.getElementById("cdTime").textContent = fmtTime(_cdRemaining);
+      if (_cdRemaining <= 0) {
+        clearInterval(_countdownTimer);
+        box.style.display = "none";
+        btn.disabled = false;
+        btn.textContent = "Send Next 1,500 Emails";
+      }
+    }, 1000);
+
+    document.getElementById("cdTime").textContent = fmtTime(_cdRemaining);
+  }
+
+  function fmtTime(secs) {
+    const h = String(Math.floor(secs / 3600)).padStart(2, "0");
+    const m = String(Math.floor((secs % 3600) / 60)).padStart(2, "0");
+    const s = String(secs % 60).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  }
+
+  // ── CV upload ──────────────────────────────────────────────────────────────
+  async function uploadCV(input) {
+    const file = input.files[0];
+    if (!file) return;
+    document.getElementById("cvFilename").textContent = "Uploading " + file.name + "…";
+
+    const fd = new FormData();
+    fd.append("cv", file);
+    const res  = await fetch("/api/upload-cv", { method: "POST", body: fd });
+    const data = await res.json();
+
+    document.getElementById("cvFilename").textContent = file.name;
+
+    if (data.fields) {
+      const f = data.fields;
+      if (f.name)               document.getElementById("cfg_your_name").value = f.name;
+      if (f.email)              document.getElementById("cfg_your_email").value = f.email;
+      if (f.university)         document.getElementById("cfg_your_university").value = f.university;
+      if (f.graduation)         document.getElementById("cfg_your_graduation").value = f.graduation;
+      if (f.internship_company) document.getElementById("cfg_your_internship_company").value = f.internship_company;
+
+      // Show extracted summary
+      const box  = document.getElementById("extractedFields");
+      const list = document.getElementById("extractedList");
+      const rows = Object.entries(f)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `<div class="ef-row"><span class="ef-key">${k.replace(/_/g," ")}</span><span class="ef-val">${v}</span></div>`)
+        .join("");
+      list.innerHTML = rows || "<p style='color:var(--muted);font-size:.85rem'>No fields extracted — fill in manually.</p>";
+      box.classList.add("active");
+    }
+  }
+
+  // Drag & drop
+  const dz = document.getElementById("dropZone");
+  dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("dragover"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("dragover");
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const dt = new DataTransfer(); dt.items.add(file);
+      const inp = document.getElementById("cvFile");
+      inp.files = dt.files;
+      uploadCV(inp);
+    }
+  });
+
+  // ── Save setup ──────────────────────────────────────────────────────────────
+  async function saveSetup() {
+    const payload = {};
+    ["your_name","your_email","gmail_app_password",
+     "your_university","your_graduation","your_internship_company"]
+      .forEach(k => { payload[k] = document.getElementById("cfg_" + k).value.trim(); });
+
+    const res  = await fetch("/api/config", { method: "POST",
+                  headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    showAlert("setupAlert", data.ok ? "success" : "error",
+              data.ok ? "Setup saved." : (data.error || "Error saving."));
+  }
+
+  // ── Save template ───────────────────────────────────────────────────────────
+  async function saveTemplate() {
+    const payload = {
+      template_subject: document.getElementById("cfg_template_subject").value,
+      template_body:    document.getElementById("cfg_template_body").value,
+    };
+    const res  = await fetch("/api/config", { method: "POST",
+                  headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    showAlert("templateAlert", data.ok ? "success" : "error",
+              data.ok ? "Template saved." : (data.error || "Error."));
+    if (data.ok) loadPreview();
+  }
+
+  // ── Preview ─────────────────────────────────────────────────────────────────
+  async function loadPreview() {
+    const res   = await fetch("/api/preview");
+    _previewData = await res.json();
+    renderPreview();
+  }
+
+  function switchPreview(mode, btn) {
+    _previewMode = mode;
+    document.querySelectorAll(".ptab").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    renderPreview();
+  }
+
+  function renderPreview() {
+    const p = _previewData[_previewMode];
+    if (!p) return;
+    document.getElementById("prevSubject").textContent = p.subject;
+    document.getElementById("prevBody").textContent    = p.body;
+  }
+
+  // ── Send ─────────────────────────────────────────────────────────────────────
+  async function sendBatch() {
+    const btn = document.getElementById("sendBtn");
+    btn.disabled = true;
+    hideAlert("sendAlert");
+
+    const res  = await fetch("/api/send", { method: "POST" });
+    const data = await res.json();
+
+    if (!data.ok) {
+      btn.disabled = false;
+      if (data.error === "cooldown") {
+        startCooldown(data.remaining_secs);
+      } else {
+        showAlert("sendAlert", "error", data.error || "Failed to start sending.");
+      }
+      return;
+    }
+
+    showAlert("sendAlert", "info", "Batch started — sending up to 1,500 emails.");
+    watchProgress();
+  }
+
+  function watchProgress() {
+    const wrap = document.getElementById("progressWrap");
+    wrap.classList.add("active");
+    document.getElementById("sendBtn").disabled = true;
+    document.getElementById("sendBtn").textContent = "Sending…";
+
+    const es = new EventSource("/api/progress-stream");
+    es.onmessage = e => {
+      const p = JSON.parse(e.data);
+      const pct = p.total > 0 ? Math.round(p.done / p.total * 100) : 0;
+
+      document.getElementById("progressFill").style.width = pct + "%";
+      document.getElementById("progressText").textContent =
+        `${p.done.toLocaleString()} / ${p.total.toLocaleString()} — ${p.success} sent, ${p.failed} failed`;
+      document.getElementById("progressPct").textContent = pct + "%";
+
+      if (!p.running) {
+        es.close();
+        wrap.classList.remove("active");
+        if (p.error) {
+          showAlert("sendAlert", "error", p.error);
+          document.getElementById("sendBtn").disabled = false;
+          document.getElementById("sendBtn").textContent = "Send Next 1,500 Emails";
+        } else {
+          showAlert("sendAlert", "success",
+            `Batch complete — ${p.success.toLocaleString()} sent, ${p.failed} failed.`);
+          startCooldown(86400);
+        }
+        refreshStats();
+      }
+    };
+    es.onerror = () => { es.close(); };
+  }
+
+  async function refreshStats() {
+    const res  = await fetch("/api/state");
+    const data = await res.json();
+    const stat = data.stats || {};
+    document.getElementById("statSendable").textContent  = (stat.sendable  || 0).toLocaleString();
+    document.getElementById("statSent").textContent      = (stat.sent      || 0).toLocaleString();
+    document.getElementById("statRemaining").textContent = (stat.remaining || 0).toLocaleString();
+    document.getElementById("statFailed").textContent    = (stat.failed    || 0).toLocaleString();
+    document.getElementById("hdrSent").textContent       = (stat.sent      || 0).toLocaleString() + " sent";
+    document.getElementById("hdrRemaining").textContent  = (stat.remaining || 0).toLocaleString() + " remaining";
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  function showAlert(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = `alert ${type} active`;
+    el.textContent = msg;
+  }
+  function hideAlert(id) {
+    document.getElementById(id).classList.remove("active");
+  }
+  function togglePass() {
+    const inp = document.getElementById("cfg_gmail_app_password");
+    inp.type = inp.type === "password" ? "text" : "password";
+  }
+
+  // ── Init ────────────────────────────────────────────────────────────────────
+  loadState();
+  loadPreview();
+</script>
+</body>
+</html>

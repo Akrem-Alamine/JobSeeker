@@ -1,0 +1,25 @@
+# Credentials — never commit
+.env
+
+# Database and generated output
+output/
+
+# CV and personal documents
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp

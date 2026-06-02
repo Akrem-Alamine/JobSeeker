@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-title">
+  {% if mode == 'verified' %}
+    <i class="bi bi-patch-check-fill text-success me-2"></i>Verified Contacts
+  {% else %}
+    <i class="bi bi-hourglass-split text-warning me-2"></i>Pending Verification
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card">
+      <div class="label">Total in this view</div>
+      <div class="value">{{ total | format_num }}</div>
+    </div>
+  </div>
+  {% if mode == 'verified' %}
+  <div class="col-md-3">
+    <div class="stat-card">
+      <div class="label">Deliverable</div>
+      <div class="value text-success">{{ deliverable | format_num }}</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card">
+      <div class="label">Unknown</div>
+      <div class="value text-primary">{{ unknown | format_num }}</div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Contacts</span>
+    <div class="d-flex gap-2">
+      {% if mode == 'verified' %}
+      <select id="statusFilter" class="form-select form-select-sm" style="width:160px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All verified</option>
+        <option value="deliverable">Deliverable</option>
+        <option value="unknown">Unknown</option>
+      </select>
+      {% endif %}
+      <select id="searchStatusFilter" class="form-select form-select-sm" style="width:160px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All search status</option>
+        <option value="enriched">Enriched</option>
+        <option value="not_found">Not Found</option>
+        <option value="pending">Not Searched</option>
+      </select>
+      <select id="sourceFilter" class="form-select form-select-sm" style="width:160px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All sources</option>
+        {% for s in sources %}
+        <option value="{{ s }}">{{ s }}</option>
+        {% endfor %}
+      </select>
+      <a href="/export/{{ mode }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-download"></i> Export CSV</a>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <table id="contactsTable" class="table table-sm mb-0 w-100">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Title</th>
+          <th>Company</th>
+          <th>Domain</th>
+          <th>Country</th>
+          <th>Email</th>
+          <th>Status</th>
+          <th>Search</th>
+          <th>Source</th>
+          <th>Added</th>
+        </tr>
+      </thead>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+  var table = $('#contactsTable').DataTable({
+    processing: true,
+    serverSide: true,
+    ajax: {
+      url: '/api/contacts/{{ mode }}',
+      data: function(d) {
+        d.status        = $('#statusFilter').val()       || '';
+        d.source        = $('#sourceFilter').val()       || '';
+        d.search_status = $('#searchStatusFilter').val() || '';
+      }
+    },
+    columns: [
+      { data: 'name' },
+      { data: 'title', defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'company', defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'domain', render: d => d ? `<a href="https://${d}" target="_blank" style="color:#388bfd;font-size:12px;">${d}</a>` : '' },
+      { data: 'country', defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'email', render: d => `<a href="mailto:${d}" style="color:#e6edf3;font-size:12px;">${d}</a>` },
+      { data: 'status', render: function(d) {
+          const colors = {deliverable:'success', unknown:'primary', unverified:'warning', confirmed:'success'};
+          const c = colors[d] || 'secondary';
+          return `<span class="badge bg-${c}">${d}</span>`;
+        }
+      },
+      { data: 'search_status', render: function(d) {
+          if (d === 'enriched')  return '<span class="badge bg-success">enriched</span>';
+          if (d === 'not_found') return '<span class="badge bg-secondary">not found</span>';
+          return '<span style="color:#484f58; font-size:11px;">—</span>';
+        }
+      },
+      { data: 'source' },
+      { data: 'added', defaultContent: '' },
+    ],
+    pageLength: 25,
+    order: [[9, 'desc']],
+    language: { search: '', searchPlaceholder: 'Search name, email, company...' }
+  });
+
+  $('#statusFilter, #sourceFilter, #searchStatusFilter').on('change', function() { table.ajax.reload(); });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h1 class="section-title mb-0"><i class="bi bi-reply-fill me-2 text-primary"></i>Responses</h1>
+</div>
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+  {% set types = [
+    ('human_reply',      'Human Replies',      'bi-person-fill',      '#3fb950'),
+    ('auto_reply',       'Auto Replies',        'bi-robot',            '#d29922'),
+    ('delivery_failure', 'Delivery Failures',  'bi-x-circle-fill',    '#f85149'),
+  ] %}
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="label">Pending</div>
+      <div class="value">{{ by_type.values() | sum }}</div>
+    </div>
+  </div>
+  {% for key, label, icon, color in types %}
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="label" style="color:{{ color }};"><i class="bi {{ icon }} me-1"></i>{{ label }}</div>
+      <div class="value" style="color:{{ color }};">{{ by_type.get(key, 0) }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Config + Actions -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-gear-fill me-2"></i>Gmail Account</div>
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label text-secondary" style="font-size:12px;">GMAIL ADDRESS</label>
+        <input id="rEmail" type="email" class="form-control form-control-sm"
+               placeholder="you@gmail.com"
+               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label text-secondary" style="font-size:12px;">APP PASSWORD</label>
+        <input id="rPassword" type="password" class="form-control form-control-sm"
+               placeholder="xxxx xxxx xxxx xxxx"
+               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+      </div>
+      <div class="col-md-4 d-flex gap-2 align-items-center flex-wrap">
+        <button id="collectBtn" class="btn btn-run px-4" onclick="collectResponses()">
+          <i class="bi bi-cloud-download me-2"></i>Collect Responses
+        </button>
+        <button id="processBtn" class="btn btn-secondary px-3" onclick="processAll()"
+                {% if not responses %}disabled{% endif %}>
+          <i class="bi bi-lightning-charge-fill me-1"></i>Process All
+        </button>
+      </div>
+    </div>
+
+    <div id="actionWrap" style="display:none; margin-top:16px;">
+      <div style="font-size:12px; color:#8b949e; margin-bottom:6px;" id="actionLabel">Working…</div>
+      <div class="progress mb-2" style="height:6px;">
+        <div id="actionBar" class="progress-bar bg-success" style="width:0%"></div>
+      </div>
+      <pre id="actionLog" class="log-output" style="max-height:200px; font-size:11px;"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- Responses table -->
+<div class="card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span><i class="bi bi-table me-2"></i>Pending Responses</span>
+    <span style="font-size:12px; color:#8b949e;">{{ responses|length }} total — processed ones are hidden</span>
+  </div>
+  <div class="card-body p-0">
+    {% if responses %}
+    <table class="table table-sm mb-0" id="respTable">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>From</th>
+          <th>Subject</th>
+          <th>Received</th>
+          <th style="width:220px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in responses %}
+        <tr id="row-{{ r.id }}">
+          <td id="type-{{ r.id }}">
+            {% if r.type == 'human_reply' %}
+              <span class="badge" style="background:#1a7f37;">Human Reply</span>
+            {% elif r.type == 'auto_reply' %}
+              <span class="badge" style="background:#9e6a03;">Auto Reply</span>
+            {% elif r.type == 'delivery_failure' %}
+              <span class="badge" style="background:#b91c1c;">Failure</span>
+            {% else %}
+              <span class="badge" style="background:#30363d;">{{ r.type }}</span>
+            {% endif %}
+          </td>
+          <td style="font-size:12px;">{{ r.from_email }}</td>
+          <td style="font-size:12px; color:#8b949e; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ r.subject }}">{{ r.subject }}</td>
+          <td style="font-size:12px; color:#8b949e; white-space:nowrap;">{{ r.received_at[:16] if r.received_at else '—' }}</td>
+          <td>
+            <div class="d-flex gap-1 flex-wrap">
+              <button class="btn btn-sm px-2 py-0" style="background:#1a7f37; color:#fff; font-size:11px;"
+                      onclick="processOne({{ r.id }}, this)" title="Mark as Important / delete / remove from DB">
+                <i class="bi bi-play-fill"></i> Process
+              </button>
+              <div class="dropdown d-inline-block">
+                <button class="btn btn-sm px-2 py-0 dropdown-toggle" style="background:#21262d; color:#8b949e; font-size:11px; border:1px solid #30363d;"
+                        data-bs-toggle="dropdown">Type</button>
+                <ul class="dropdown-menu dropdown-menu-end" style="background:#161b22; border-color:#30363d; font-size:12px; min-width:150px;">
+                  <li><a class="dropdown-item" href="#" style="color:#3fb950;" onclick="reclassify({{ r.id }}, 'human_reply', this); return false;">👤 Human Reply</a></li>
+                  <li><a class="dropdown-item" href="#" style="color:#d29922;" onclick="reclassify({{ r.id }}, 'auto_reply', this); return false;">🤖 Auto Reply</a></li>
+                  <li><a class="dropdown-item" href="#" style="color:#f85149;" onclick="reclassify({{ r.id }}, 'delivery_failure', this); return false;">❌ Delivery Failure</a></li>
+                </ul>
+              </div>
+            </div>
+            <div id="status-{{ r.id }}" style="font-size:11px; color:#8b949e; margin-top:2px;"></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:40px; text-align:center; color:#8b949e;">
+      <i class="bi bi-inbox" style="font-size:2rem; display:block; margin-bottom:8px;"></i>
+      No pending responses. Click <strong>Collect Responses</strong> to scan Gmail.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+// Auto-load credentials from outreach page (shared localStorage)
+(function() {
+  const email = localStorage.getItem('outreach_email');
+  const pass  = localStorage.getItem('outreach_password');
+  if (email) document.getElementById('rEmail').value = email;
+  if (pass)  document.getElementById('rPassword').value = pass;
+})();
+
+function _creds() {
+  return {
+    email:    document.getElementById('rEmail').value.trim(),
+    password: document.getElementById('rPassword').value.trim(),
+  };
+}
+
+function _setUi(working) {
+  document.getElementById('collectBtn').disabled = working;
+  document.getElementById('processBtn').disabled = working;
+  document.getElementById('actionWrap').style.display = working ? 'block' : 'block';
+}
+
+function collectResponses() {
+  const { email, password } = _creds();
+  if (!email || !password) { alert('Enter Gmail credentials first.'); return; }
+
+  const log   = document.getElementById('actionLog');
+  const bar   = document.getElementById('actionBar');
+  const label = document.getElementById('actionLabel');
+  log.textContent = '';
+  bar.style.width = '0%';
+  document.getElementById('actionWrap').style.display = 'block';
+  document.getElementById('collectBtn').disabled = true;
+  document.getElementById('processBtn').disabled = true;
+  label.textContent = 'Connecting to Gmail…';
+
+  fetch('/responses/collect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email, password}),
+  }).then(resp => {
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    function read() {
+      reader.read().then(({done, value}) => {
+        if (done) return;
+        buffer += decoder.decode(value);
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        lines.forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          const d = JSON.parse(line.slice(6));
+          if (d.error) {
+            log.textContent += `ERROR: ${d.error}\n`;
+            document.getElementById('collectBtn').disabled = false;
+            return;
+          }
+          if (d.step === 'connecting') { label.textContent = 'Connecting…'; bar.style.width = '20%'; }
+          if (d.step === 'scanning')   { label.textContent = 'Scanning folders…'; bar.style.width = '60%'; }
+          if (d.step === 'done') {
+            bar.style.width = '100%';
+            label.textContent = `Collected ${d.count} new response(s).`;
+            if (d.count > 0) {
+              d.items.forEach(item => {
+                log.textContent += `  [${item.type}] ${item.from_email} — ${item.subject}\n`;
+              });
+              log.textContent += `\nReload the page to see them in the table.\n`;
+              setTimeout(() => location.reload(), 1500);
+            } else {
+              log.textContent += 'No new responses found.\n';
+              document.getElementById('collectBtn').disabled = false;
+              document.getElementById('processBtn').disabled = false;
+            }
+          }
+          log.scrollTop = log.scrollHeight;
+        });
+        read();
+      });
+    }
+    read();
+  });
+}
+
+function processAll() {
+  const { email, password } = _creds();
+  if (!email || !password) { alert('Enter Gmail credentials first.'); return; }
+
+  const log   = document.getElementById('actionLog');
+  const bar   = document.getElementById('actionBar');
+  const label = document.getElementById('actionLabel');
+  log.textContent = '';
+  bar.style.width = '0%';
+  document.getElementById('actionWrap').style.display = 'block';
+  document.getElementById('collectBtn').disabled = true;
+  document.getElementById('processBtn').disabled = true;
+  label.textContent = 'Processing responses…';
+
+  const TYPE_ICONS = {
+    human_reply:      '👤',
+    auto_reply:       '🤖',
+    delivery_failure: '❌',
+  };
+
+  fetch('/responses/process', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email, password}),
+  }).then(resp => {
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let total  = 0;
+    function read() {
+      reader.read().then(({done, value}) => {
+        if (done) return;
+        buffer += decoder.decode(value);
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        lines.forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          const d = JSON.parse(line.slice(6));
+          if (d.error) {
+            log.textContent += `ERROR: ${d.error}\n`;
+            document.getElementById('collectBtn').disabled = false;
+            document.getElementById('processBtn').disabled = false;
+            return;
+          }
+          if (d.step === 'start') {
+            total = d.total;
+            label.textContent = `Processing ${total} response(s)…`;
+          }
+          if (d.step === 'item') {
+            const icon = TYPE_ICONS[d.type] || '•';
+            log.textContent += `${icon} [${d.type}] ${d.email} → ${d.result}\n`;
+            bar.style.width = (d.index / total * 100) + '%';
+          }
+          if (d.step === 'done') {
+            bar.style.width = '100%';
+            label.textContent = d.total > 0 ? `Done — ${d.total} response(s) processed.` : 'Nothing to process.';
+            document.getElementById('collectBtn').disabled = false;
+            document.getElementById('processBtn').disabled = false;
+            if (d.total > 0) setTimeout(() => location.reload(), 1500);
+          }
+          log.scrollTop = log.scrollHeight;
+        });
+        read();
+      });
+    }
+    read();
+  });
+}
+function processOne(id, btn) {
+  const { email, password } = _creds();
+  if (!email || !password) { alert('Enter Gmail credentials first.'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+  const status = document.getElementById('status-' + id);
+  status.textContent = 'working…';
+  fetch('/responses/process-one/' + id, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email, password}),
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      status.textContent = '✗ ' + d.error;
+      status.style.color = '#f85149';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-play-fill"></i> Process';
+    } else {
+      status.textContent = '✓ ' + d.result;
+      status.style.color = '#3fb950';
+      const row = document.getElementById('row-' + id);
+      setTimeout(() => row.style.opacity = '0.35', 800);
+    }
+  });
+}
+
+function reclassify(id, newType, link) {
+  const labels = {human_reply: '👤 Human Reply', auto_reply: '🤖 Auto Reply', delivery_failure: '❌ Delivery Failure'};
+  const colors = {human_reply: '#1a7f37', auto_reply: '#9e6a03', delivery_failure: '#b91c1c'};
+  fetch('/responses/reclassify/' + id, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({type: newType}),
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      const cell = document.getElementById('type-' + id);
+      cell.innerHTML = `<span class="badge" style="background:${colors[newType]};">${labels[newType].slice(3)}</span>`;
+      document.getElementById('status-' + id).textContent = 'reclassified';
+    }
+  });
+}
+
+</script>
+{% endblock %}

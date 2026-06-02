@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-title">Companies</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card">
+      <div class="label">Total Companies</div>
+      <div class="value">{{ total | format_num }}</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">With Contacts</div>
+      <div class="value text-success">{{ success | format_num }}</div>
+      <div class="sub">directive found</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Exhausted</div>
+      <div class="value text-warning">{{ exhausted | format_num }}</div>
+      <div class="sub">all steps tried</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Pending</div>
+      <div class="value" style="color:#8b949e;">{{ pending | format_num }}</div>
+      <div class="sub">not yet scraped</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card">
+      <div class="label">Countries</div>
+      <div class="value">{{ country_count | format_num }}</div>
+      <div class="sub">with known country</div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body py-2">
+    <div class="progress">
+      <div class="progress-bar bg-success"
+           style="width:{{ (success / total * 100) | round(1) if total else 0 }}%"></div>
+      <div class="progress-bar bg-warning"
+           style="width:{{ (exhausted / total * 100) | round(1) if total else 0 }}%"></div>
+    </div>
+    <div class="mt-1" style="font-size:12px;color:#8b949e;">
+      {{ (success + exhausted) | format_num }} / {{ total | format_num }} processed &nbsp;·&nbsp;
+      <span class="text-success">{{ success | format_num }} hits</span> &nbsp;·&nbsp;
+      <span class="text-warning">{{ exhausted | format_num }} exhausted</span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>All Companies</span>
+    <div class="d-flex gap-2">
+      <select id="statusFilter" class="form-select form-select-sm" style="width:160px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All status</option>
+        <option value="0">Pending</option>
+        <option value="1">With Contacts</option>
+        <option value="2">Exhausted</option>
+      </select>
+      <select id="countryFilter" class="form-select form-select-sm" style="width:180px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All countries</option>
+        {% for c in countries %}
+        <option value="{{ c }}">{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <table id="companiesTable" class="table table-sm mb-0 w-100">
+      <thead>
+        <tr>
+          <th>Name</th><th>Domain</th><th>Country</th>
+          <th>Source</th><th>Status</th><th>Added</th>
+        </tr>
+      </thead>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+  var table = $('#companiesTable').DataTable({
+    processing: true,
+    serverSide: true,
+    ajax: {
+      url: '/api/companies',
+      data: function(d) {
+        d.status  = $('#statusFilter').val();
+        d.country = $('#countryFilter').val();
+      }
+    },
+    columns: [
+      { data: 'name' },
+      { data: 'domain', render: d => `<a href="https://${d}" target="_blank" style="color:#388bfd;">${d}</a>` },
+      { data: 'country', defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'source',  defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'scraped', render: function(d) {
+          if (d == 1) return '<span class="badge bg-success">Hit</span>';
+          if (d == 2) return '<span class="badge bg-warning text-dark">Exhausted</span>';
+          return '<span class="badge bg-secondary">Pending</span>';
+        }
+      },
+      { data: 'added_at', defaultContent: '' },
+    ],
+    pageLength: 25,
+    order: [[5, 'desc']],
+    language: { search: '', searchPlaceholder: 'Search...' }
+  });
+  $('#statusFilter, #countryFilter').on('change', function() { table.ajax.reload(); });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-title">Run Pipeline</div>
+
+<div class="row g-3">
+  {% for step in steps %}
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">{{ step.icon }} {{ step.name }}</div>
+      <div class="card-body">
+        <p style="color:#8b949e; font-size:13px;">{{ step.desc }}</p>
+        {% if step.has_limit %}
+        <div class="d-flex gap-3 mb-3">
+          <div>
+            <label class="form-label" style="font-size:12px; color:#8b949e;">Companies per run</label>
+            <input type="number" id="limit_{{ step.id }}" class="form-control form-control-sm"
+                   value="1000" min="10" max="100000"
+                   style="background:#21262d; border-color:#30363d; color:#e6edf3; width:130px;">
+          </div>
+          <div>
+            <label class="form-label" style="font-size:12px; color:#8b949e;">Parallel workers</label>
+            <input type="number" id="workers_{{ step.id }}" class="form-control form-control-sm"
+                   value="30" min="1" max="100"
+                   style="background:#21262d; border-color:#30363d; color:#e6edf3; width:100px;">
+          </div>
+        </div>
+        {% elif step.has_workers %}
+        <div class="d-flex gap-3 mb-3">
+          <div>
+            <label class="form-label" style="font-size:12px; color:#8b949e;">Parallel workers</label>
+            <input type="number" id="workers_{{ step.id }}" class="form-control form-control-sm"
+                   value="3" min="1" max="10"
+                   style="background:#21262d; border-color:#30363d; color:#e6edf3; width:100px;">
+            <div style="font-size:11px; color:#484f58; margin-top:4px;">
+              DDG rate-limited to 1 req/s — more workers = parallel Ollama calls
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        <button class="btn btn-run btn-sm" onclick="runStep('{{ step.id }}', {{ step.has_limit | lower }}, {{ (step.has_workers and not step.has_limit) | lower }})">
+          <i class="bi bi-play-fill"></i> Run {{ step.name }}
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card mt-4" id="outputCard" style="display:none;">
+  <div class="card-header d-flex justify-content-between">
+    <span id="runningLabel">Running...</span>
+    <button class="btn btn-sm btn-outline-danger" onclick="stopRun()"><i class="bi bi-stop-fill"></i> Stop</button>
+  </div>
+  <div class="card-body p-0">
+    <pre class="log-output m-0" id="logOutput"></pre>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let evtSource = null;
+
+function runStep(step, hasLimit, hasWorkers) {
+  let url = `/run/${step}`;
+  if (hasLimit) {
+    const limit   = document.getElementById('limit_'   + step).value;
+    const workers = document.getElementById('workers_' + step).value;
+    url += `?limit=${limit}&workers=${workers}`;
+  } else if (hasWorkers) {
+    const workers = document.getElementById('workers_' + step).value;
+    url += `?workers=${workers}`;
+  }
+  document.getElementById('outputCard').style.display = '';
+  document.getElementById('runningLabel').textContent = 'Running ' + step + '...';
+  const log = document.getElementById('logOutput');
+  log.textContent = '';
+
+  if (evtSource) evtSource.close();
+  evtSource = new EventSource(url);
+  evtSource.onmessage = function(e) {
+    if (e.data === '__done__') {
+      evtSource.close();
+      document.getElementById('runningLabel').textContent = 'Done ✓';
+      return;
+    }
+    log.textContent += e.data + '\n';
+    log.scrollTop = log.scrollHeight;
+  };
+  evtSource.onerror = function() { evtSource.close(); };
+}
+
+function stopRun() {
+  if (evtSource) { evtSource.close(); }
+  document.getElementById('runningLabel').textContent = 'Stopped';
+}
+</script>
+{% endblock %}

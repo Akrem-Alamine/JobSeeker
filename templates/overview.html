@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-title">Overview</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Total Companies</div>
+      <div class="value">{{ stats.total_companies | format_num }}</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Hit</div>
+      <div class="value text-success">{{ stats.hit | format_num }}</div>
+      <div class="sub">directive found</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Exhausted</div>
+      <div class="value text-warning">{{ stats.exhausted | format_num }}</div>
+      <div class="sub">all steps tried</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Pending</div>
+      <div class="value" style="color:#8b949e;">{{ stats.pending | format_num }}</div>
+      <div class="sub">not yet scraped</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Total Contacts</div>
+      <div class="value">{{ stats.total_contacts | format_num }}</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Deliverable</div>
+      <div class="value text-success">{{ stats.deliverable | format_num }}</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Unknown</div>
+      <div class="value text-primary">{{ stats.unknown | format_num }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Scraping Progress</div>
+  <div class="card-body py-2">
+    <div class="progress">
+      <div class="progress-bar bg-success"
+           style="width:{{ (stats.hit / stats.total_companies * 100) | round(1) if stats.total_companies else 0 }}%"></div>
+      <div class="progress-bar bg-warning"
+           style="width:{{ (stats.exhausted / stats.total_companies * 100) | round(1) if stats.total_companies else 0 }}%"></div>
+    </div>
+    <div class="mt-1" style="font-size:12px; color:#8b949e;">
+      {{ stats.processed | format_num }} / {{ stats.total_companies | format_num }} processed
+      &nbsp;·&nbsp;
+      <span class="text-success">{{ stats.hit | format_num }} hits</span>
+      &nbsp;·&nbsp;
+      <span class="text-warning">{{ stats.exhausted | format_num }} exhausted</span>
+      &nbsp;·&nbsp;
+      <span style="color:#8b949e;">{{ stats.pending | format_num }} pending</span>
+      &nbsp;·&nbsp;
+      {{ stats.scrape_pct }}% done
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Email Status</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0" style="color:#e6edf3;">
+          <thead><tr><th>Status</th><th class="text-end">Count</th></tr></thead>
+          <tbody>
+            {% for s, n in stats.by_status %}
+            <tr>
+              <td>
+                {% if s == 'deliverable' %}<span class="badge badge-deliverable">deliverable</span>
+                {% elif s == 'unknown' %}<span class="badge badge-unknown">unknown</span>
+                {% elif s == 'unverified' %}<span class="badge badge-unverified">unverified</span>
+                {% else %}<span class="badge bg-secondary">{{ s }}</span>{% endif %}
+              </td>
+              <td class="text-end">{{ n | format_num }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Contacts by Source</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0" style="color:#e6edf3;">
+          <thead><tr><th>Source</th><th class="text-end">Count</th></tr></thead>
+          <tbody>
+            {% for src, n in stats.by_source %}
+            <tr><td>{{ src }}</td><td class="text-end">{{ n | format_num }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

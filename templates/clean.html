@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-title">Verify & Clean</div>
+
+<div class="row g-3 mb-4">
+  {% for s, n in status_counts %}
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">{{ s }}</div>
+      <div class="value">{{ n | format_num }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-envelope-check"></i> Run Verification</div>
+      <div class="card-body">
+        <p style="color:#8b949e; font-size:13px;">SMTP-verify all unverified contacts. Connects to each mail server to confirm the address exists.</p>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="smtpToggle" checked>
+          <label class="form-check-label" style="color:#8b949e; font-size:13px;">Enable SMTP check (recommended)</label>
+        </div>
+        <button class="btn btn-run btn-sm" onclick="runVerify()">
+          <i class="bi bi-play-fill"></i> Start Verification
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-trash3"></i> Remove Bad Contacts</div>
+      <div class="card-body">
+        {% for label, status, count, color in delete_options %}
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span style="color:#e6edf3;">{{ label }} <span class="badge bg-{{ color }}">{{ count | format_num }}</span></span>
+          <form method="post" action="/clean/delete" style="display:inline;">
+            <input type="hidden" name="status" value="{{ status }}">
+            <button class="btn btn-sm btn-outline-danger" {% if count == 0 %}disabled{% endif %}>Delete</button>
+          </form>
+        </div>
+        {% endfor %}
+        <hr style="border-color:#30363d;">
+        <form method="post" action="/clean/delete-all">
+          <button class="btn btn-danger btn-sm w-100">
+            <i class="bi bi-trash3-fill"></i> Delete All Bad Contacts
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-4" id="outputCard" style="display:none;">
+  <div class="card-header" id="verifyLabel">Running verification...</div>
+  <div class="card-body p-0">
+    <pre class="log-output m-0" id="logOutput"></pre>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function runVerify() {
+  const smtp = document.getElementById('smtpToggle').checked;
+  const url = `/run/verify-db?smtp=${smtp}`;
+  document.getElementById('outputCard').style.display = '';
+  document.getElementById('verifyLabel').textContent = 'Running verification...';
+  const log = document.getElementById('logOutput');
+  log.textContent = '';
+
+  const evtSource = new EventSource(url);
+  evtSource.onmessage = function(e) {
+    if (e.data === '__done__') {
+      evtSource.close();
+      document.getElementById('verifyLabel').textContent = 'Verification complete ✓';
+      setTimeout(() => location.reload(), 1500);
+      return;
+    }
+    log.textContent += e.data + '\n';
+    log.scrollTop = log.scrollHeight;
+  };
+  evtSource.onerror = function() { evtSource.close(); };
+}
+</script>
+{% endblock %}

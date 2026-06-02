@@ -1,0 +1,681 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="section-title">Outreach</div>
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label">Available</div>
+      <div class="value">{{ total | format_num }}</div>
+      <div class="sub">verified contacts</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label" style="color:#d29922;">Ready to Send</div>
+      <div class="value" id="statReady" style="color:#d29922;">{{ drafts | format_num }}</div>
+      <div class="sub">letters prepared</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label" style="color:#3fb950;">Sent</div>
+      <div class="value text-success">{{ sent | format_num }}</div>
+      <div class="sub">applications sent</div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="stat-card">
+      <div class="label" style="color:#f85149;">Failed</div>
+      <div class="value text-danger">{{ failed | format_num }}</div>
+      <div class="sub">delivery errors</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card">
+      <div class="label">CV</div>
+      <div class="value" style="font-size:18px; padding-top:6px;">
+        {% if cv_ready %}
+          <span class="text-success"><i class="bi bi-file-earmark-check-fill"></i> Uploaded</span>
+        {% else %}
+          <span style="color:#8b949e;"><i class="bi bi-file-earmark-x"></i> Not uploaded</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Prepare Letters -->
+<div class="card mb-4">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span><i class="bi bi-cpu-fill me-2 text-warning"></i>Prepare Letters</span>
+    <span id="prepareReadyBadge" style="font-size:12px; color:#d29922;">
+      <span id="prepareReadyCount">{{ drafts }}</span> ready
+    </span>
+  </div>
+  <div class="card-body">
+    <div id="prepareStatus" style="font-size:12px; color:#8b949e; margin-bottom:10px;">
+      LLM generates letters in the background and stores them ready to send.
+      Runs independently — won't stop if you close this page.
+    </div>
+    <div id="prepareProgressWrap" style="display:none; margin-bottom:12px;">
+      <div style="font-size:12px; color:#8b949e; margin-bottom:4px;" id="prepareLabel">Preparing…</div>
+      <div class="progress mb-2" style="height:6px;">
+        <div id="prepareBar" class="progress-bar bg-warning" style="width:0%"></div>
+      </div>
+      <div id="prepareCurrent" style="display:flex; flex-direction:column; gap:2px;"></div>
+    </div>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label style="font-size:12px; color:#8b949e; white-space:nowrap;">Workers</label>
+        <input id="workerCount" type="number" min="1" max="8" value="1"
+               style="width:60px; background:#0d1117; border:1px solid #30363d; border-radius:6px;
+                      color:#e6edf3; font-size:13px; padding:4px 8px; text-align:center;">
+      </div>
+      <button id="prepareStartBtn" class="btn btn-warning px-4" onclick="startPrepare()">
+        <i class="bi bi-cpu me-2"></i>Start Preparing
+      </button>
+      <button id="prepareStopBtn" class="btn btn-outline-warning px-3" onclick="stopPrepare()" style="display:none;">
+        <i class="bi bi-stop-fill me-1"></i>Stop
+      </button>
+      <span style="font-size:12px; color:#8b949e;">Each worker gets its own Ollama instance (ports 11434, 11435…). Model loads once per instance.</span>
+    </div>
+  </div>
+</div>
+
+<!-- Send Letters -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-send-fill me-2"></i>Send Letters</div>
+  <div class="card-body">
+    <div id="batchCooldown" style="display:none; margin-bottom:14px;">
+      <div style="background:#2d2000; border:1px solid #6e4a00; border-radius:8px; padding:14px 18px; display:flex; align-items:center; gap:14px;">
+        <i class="bi bi-clock-history" style="font-size:1.4rem; color:#d29922;"></i>
+        <div style="flex:1;">
+          <div style="font-size:11px; color:#d29922; text-transform:uppercase; letter-spacing:.05em; font-weight:700;">Next batch available in</div>
+          <div id="cdTime" style="font-size:1.8rem; font-weight:700; color:#d29922; font-variant-numeric:tabular-nums; letter-spacing:.04em;">—</div>
+        </div>
+        <button class="btn btn-sm btn-outline-warning" onclick="resetCooldown()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+        </button>
+      </div>
+    </div>
+
+    <div id="batchProgressWrap" style="display:none; margin-bottom:14px;">
+      <div style="font-size:12px; color:#8b949e; margin-bottom:6px;" id="batchProgressLabel">Sending…</div>
+      <div class="progress mb-2" style="height:6px;">
+        <div id="batchProgressBar" class="progress-bar bg-success" style="width:0%"></div>
+      </div>
+      <pre id="batchLog" class="log-output" style="max-height:220px; font-size:11px;"></pre>
+    </div>
+
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label style="font-size:12px; color:#8b949e; white-space:nowrap;">How many</label>
+        <input id="batchSizeInput" type="number" min="1" max="10000" placeholder="e.g. 500"
+               style="width:110px; background:#0d1117; border:1px solid #30363d; border-radius:6px;
+                      color:#e6edf3; font-size:13px; padding:4px 8px; text-align:center;">
+      </div>
+      <button id="batchSendBtn" class="btn btn-run px-4" onclick="startBatchSend()">
+        <i class="bi bi-send-fill me-2"></i>Send
+      </button>
+      <button id="batchStopBtn" class="btn btn-danger px-3" onclick="stopBatch()" style="display:none;">
+        <i class="bi bi-stop-fill me-1"></i>Stop
+      </button>
+      <span style="font-size:12px; color:#8b949e;">Sends from prepared letters only. Fast — no LLM during send.</span>
+    </div>
+  </div>
+</div>
+
+<!-- Configuration -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-gear-fill me-2"></i>Configuration</span>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label text-secondary" style="font-size:12px;">YOUR GMAIL ADDRESS</label>
+        <input id="senderEmail" type="email" class="form-control form-control-sm"
+               placeholder="you@gmail.com"
+               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label text-secondary" style="font-size:12px;">GMAIL APP PASSWORD</label>
+        <input id="senderPassword" type="password" class="form-control form-control-sm"
+               placeholder="xxxx xxxx xxxx xxxx"
+               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+        <div class="mt-1" style="font-size:11px; color:#8b949e;">
+          Gmail → Account → Security → 2-Step → App passwords
+        </div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label text-secondary" style="font-size:12px;">REPLY-TO ADDRESS <span style="color:#8b949e;">(optional)</span></label>
+        <input id="replyTo" type="email" class="form-control form-control-sm"
+               placeholder="replies@example.com"
+               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+        <div class="mt-1" style="font-size:11px; color:#8b949e;">
+          Where recipients' replies are directed
+        </div>
+      </div>
+      <div class="col-md-3 d-flex align-items-end gap-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="testEmail()">
+          <i class="bi bi-plug-fill me-1"></i>Test Connection
+        </button>
+        <span id="testResult" style="font-size:12px;"></span>
+      </div>
+    </div>
+
+    <hr style="border-color:#30363d; margin: 16px 0;">
+
+    <div class="row g-3 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label text-secondary" style="font-size:12px;">UPLOAD YOUR CV (PDF)</label>
+        <input id="cvFile" type="file" accept=".pdf" class="form-control form-control-sm"
+               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-sm btn-outline-primary" onclick="uploadCV()">
+          <i class="bi bi-upload me-1"></i>Upload CV
+        </button>
+        <span id="cvResult" class="ms-2" style="font-size:12px;"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Email Template Preview -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-envelope-paper-fill me-2"></i>Email Template</div>
+  <div class="card-body" style="font-size:13px;">
+    <div class="row g-3">
+      <div class="col-md-5">
+        <div style="color:#8b949e; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">Structure</div>
+        <div style="background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:16px; line-height:1.9;">
+          <div><span style="color:#58a6ff;">To:</span> <span style="color:#e6edf3;">contact@company.com</span></div>
+          <div><span style="color:#58a6ff;">Subject:</span> <span style="color:#e6edf3;">Speculative Application – [Your Name]</span></div>
+          <hr style="border-color:#30363d; margin:10px 0;">
+          <div style="color:#7ee787;">Dear [First Name],</div>
+          <div style="color:#8b949e; margin-top:8px;">↳ Express interest + one specific thing about the company</div>
+          <div style="color:#8b949e; margin-top:4px;">↳ Introduce yourself + 1-2 relevant skills from CV</div>
+          <div style="color:#8b949e; margin-top:4px;">↳ Mention attached CV + ask to connect</div>
+          <div style="color:#7ee787; margin-top:8px;">Best regards,<br>[Your Name]<br>[Phone] · [LinkedIn]</div>
+          <div style="color:#8b949e; margin-top:8px; font-size:11px;">📎 CV attached (PDF)</div>
+        </div>
+      </div>
+      <div class="col-md-7">
+        <div style="color:#8b949e; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">
+          Live Preview
+          <span style="color:#484f58; font-size:10px; margin-left:8px;">click the eye icon on any row to generate that contact's letter</span>
+        </div>
+        <div id="previewBox" style="background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:16px; min-height:160px; color:#8b949e; font-size:12px; line-height:1.7; white-space:pre-wrap;">
+          Click the eye icon on any contact row to preview the generated letter.
+        </div>
+        <div class="d-flex gap-2 mt-2 align-items-center">
+          <span id="previewMeta" style="font-size:11px; color:#8b949e;"></span>
+          <div id="previewSpinner" class="spinner-border spinner-border-sm text-primary ms-2" style="display:none;" role="status"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Contacts table -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Select Contacts to Send To</span>
+    <div class="d-flex gap-2 align-items-center">
+      <select id="countryFilter" class="form-select form-select-sm"
+              style="width:160px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All countries</option>
+        {% for c in countries %}
+        <option value="{{ c }}">{{ c }}</option>
+        {% endfor %}
+      </select>
+      <select id="statusFilter" class="form-select form-select-sm"
+              style="width:140px; background:#21262d; border-color:#30363d; color:#e6edf3;">
+        <option value="">All contacts</option>
+        <option value="unsent">Not sent yet</option>
+        <option value="sent">Already sent</option>
+      </select>
+      <button class="btn btn-sm btn-outline-secondary" onclick="toggleSelectAll()">Select All</button>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <table id="outreachTable" class="table table-sm mb-0 w-100">
+      <thead>
+        <tr>
+          <th style="width:40px;"><input type="checkbox" id="selectAllChk" onchange="toggleAll(this)"></th>
+          <th>Name</th><th>Title</th><th>Company</th><th>Country</th>
+          <th>Email</th><th>Status</th><th>Outreach</th><th style="width:70px;"></th>
+        </tr>
+      </thead>
+    </table>
+  </div>
+</div>
+
+<!-- Send button + progress -->
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <button id="sendBtn" class="btn btn-run px-4" onclick="startSending()">
+        <i class="bi bi-send-fill me-2"></i>Send Applications
+      </button>
+      <span id="selectionCount" style="font-size:13px; color:#8b949e;">0 contacts selected</span>
+    </div>
+    <div id="progressWrap" style="display:none;">
+      <div class="progress mb-2" style="height:6px;">
+        <div id="progressBar" class="progress-bar bg-success" style="width:0%"></div>
+      </div>
+      <pre id="sendLog" class="log-output" style="max-height:300px;"></pre>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedIds = new Set();
+let table;
+
+$(document).ready(function() {
+  table = $('#outreachTable').DataTable({
+    processing: true,
+    serverSide: true,
+    ajax: {
+      url: '/api/outreach/contacts',
+      data: d => {
+        d.country = $('#countryFilter').val();
+        d.status  = $('#statusFilter').val();
+      }
+    },
+    columns: [
+      { data: 'id', orderable: false, render: d =>
+          `<input type="checkbox" class="row-chk" value="${d}" ${selectedIds.has(d) ? 'checked' : ''} onchange="toggleRow(this)">` },
+      { data: 'name' },
+      { data: 'title',   defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'company', defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'country', defaultContent: '<span style="color:#484f58">—</span>' },
+      { data: 'email',   render: d => `<span style="color:#8b949e;font-size:12px;">${d}</span>` },
+      { data: 'status',  render: d =>
+          d === 'deliverable'
+            ? '<span class="badge badge-deliverable">deliverable</span>'
+            : '<span class="badge badge-unknown">unknown</span>' },
+      { data: 'outreach_status', render: d =>
+          d === 'sent'
+            ? '<span class="badge bg-success">sent</span>'
+            : '<span class="badge bg-secondary">unsent</span>' },
+      { data: 'id', orderable: false, render: d =>
+          `<button class="btn btn-outline-secondary" style="font-size:10px;padding:2px 8px;"
+            onclick="previewLetter(${d})"><i class="bi bi-eye"></i></button>` },
+    ],
+    pageLength: 25,
+    order: [[1, 'asc']],
+    language: { search: '', searchPlaceholder: 'Search...' }
+  });
+
+  $('#countryFilter, #statusFilter').on('change', () => table.ajax.reload());
+});
+
+function toggleRow(chk) {
+  const id = parseInt(chk.value);
+  if (chk.checked) selectedIds.add(id); else selectedIds.delete(id);
+  updateCount();
+}
+
+function toggleAll(chk) {
+  document.querySelectorAll('.row-chk').forEach(c => {
+    c.checked = chk.checked;
+    const id = parseInt(c.value);
+    if (chk.checked) selectedIds.add(id); else selectedIds.delete(id);
+  });
+  updateCount();
+}
+
+function toggleSelectAll() {
+  document.getElementById('selectAllChk').click();
+}
+
+function updateCount() {
+  document.getElementById('selectionCount').textContent = `${selectedIds.size} contacts selected`;
+}
+
+async function previewLetter(id) {
+  const box     = document.getElementById('previewBox');
+  const spinner = document.getElementById('previewSpinner');
+  const meta    = document.getElementById('previewMeta');
+
+  box.style.color  = '#8b949e';
+  box.textContent  = 'Generating letter…';
+  spinner.style.display = 'inline-block';
+  meta.textContent = '';
+
+  try {
+    const r = await fetch(`/outreach/preview/${id}`);
+    const j = await r.json();
+    if (!j.ok) {
+      box.textContent = '✗ ' + j.error;
+    } else {
+      box.style.color = '#e6edf3';
+      box.textContent = `To: ${j.to}\nSubject: ${j.subject}\n\n${j.letter}`;
+      const tierColors = { full: '#3fb950', partial: '#d29922', generic: '#8b949e' };
+      const tierLabel  = { full: 'Personalized (name + title)', partial: 'Personalized (name)', generic: 'Company greeting' };
+      meta.innerHTML = `<strong>${j.company || j.to}</strong> &nbsp;
+        <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#21262d;color:${tierColors[j.tier] || '#8b949e'}">
+          ${tierLabel[j.tier] || j.tier}
+        </span>`;
+    }
+  } catch(e) {
+    box.textContent = 'Error: ' + e;
+  } finally {
+    spinner.style.display = 'none';
+  }
+}
+
+async function uploadCV() {
+  const file = document.getElementById('cvFile').files[0];
+  if (!file) { alert('Please choose a PDF file first'); return; }
+  const form = new FormData();
+  form.append('cv', file);
+  const r = await fetch('/outreach/upload-cv', { method: 'POST', body: form });
+  const j = await r.json();
+  const el = document.getElementById('cvResult');
+  el.textContent = j.ok ? '✓ Saved' : '✗ ' + j.error;
+  el.style.color = j.ok ? '#3fb950' : '#f85149';
+}
+
+{% if cv_ready %}
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('cvResult');
+  el.textContent = '✓ cv.pdf on server';
+  el.style.color = '#3fb950';
+});
+{% endif %}
+
+async function testEmail() {
+  const email = document.getElementById('senderEmail').value.trim();
+  const pass  = document.getElementById('senderPassword').value.trim();
+  const el    = document.getElementById('testResult');
+  el.textContent = 'Testing...'; el.style.color = '#8b949e';
+  const r = await fetch('/outreach/test-email', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({email, password: pass})
+  });
+  const j = await r.json();
+  if (j.ok) {
+    localStorage.setItem('outreach_email', email);
+    localStorage.setItem('outreach_password', pass);
+    const replyTo = document.getElementById('replyTo').value.trim();
+    if (replyTo) localStorage.setItem('outreach_reply_to', replyTo);
+    el.textContent = '✓ Connected & saved'; el.style.color = '#3fb950';
+  } else {
+    el.textContent = '✗ ' + j.error; el.style.color = '#f85149';
+  }
+}
+
+(function loadSavedConfig() {
+  const email   = localStorage.getItem('outreach_email');
+  const pass    = localStorage.getItem('outreach_password');
+  const replyTo = localStorage.getItem('outreach_reply_to');
+  if (email)   document.getElementById('senderEmail').value = email;
+  if (pass)    document.getElementById('senderPassword').value = pass;
+  document.getElementById('replyTo').value = replyTo || 'akrem.alamine+outreach@etudiant-fst.utm.tn';
+})();
+
+function startSending() {
+  if (selectedIds.size === 0) { alert('Select at least one contact'); return; }
+  const email   = document.getElementById('senderEmail').value.trim();
+  const pass    = document.getElementById('senderPassword').value.trim();
+  const replyTo = document.getElementById('replyTo').value.trim();
+  if (!email || !pass) { alert('Enter your Gmail and app password first'); return; }
+  if (!confirm(`Send ${selectedIds.size} application emails?`)) return;
+
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('sendBtn').disabled = true;
+  const log = document.getElementById('sendLog');
+  const bar = document.getElementById('progressBar');
+  log.textContent = '';
+
+  fetch('/outreach/send', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({email, password: pass, reply_to: replyTo, contact_ids: [...selectedIds]})
+  }).then(resp => {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    function read() {
+      reader.read().then(({done, value}) => {
+        if (done) return;
+        buffer += decoder.decode(value);
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        lines.forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          const d = JSON.parse(line.slice(6));
+          if (d.error) { log.textContent += `ERROR: ${d.error}\n`; return; }
+          if (d.step === 'generating')
+            log.textContent += `[${d.index}/${d.total}] Generating letter for ${d.company}...\n`;
+          else if (d.step === 'sending')
+            log.textContent += `  → Sending to ${d.company}...\n`;
+          else if (d.step === 'done') {
+            const icon = d.status === 'sent' ? '✓' : '✗';
+            log.textContent += `  ${icon} ${d.status.toUpperCase()}${d.error ? ': ' + d.error : ''}\n`;
+            bar.style.width = (d.index / selectedIds.size * 100) + '%';
+          } else if (d.step === 'finished') {
+            log.textContent += `\n✓ Done — ${d.total} emails processed.\n`;
+            document.getElementById('sendBtn').disabled = false;
+            table.ajax.reload();
+          }
+          log.scrollTop = log.scrollHeight;
+        });
+        read();
+      });
+    }
+    read();
+  });
+}
+
+// ── Prepare letters ────────────────────────────────────────────────────────
+let _preparePoller = null;
+
+async function startPrepare() {
+  const workers = parseInt(document.getElementById('workerCount').value, 10) || 1;
+  const r = await fetch('/outreach/prepare/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({workers})
+  });
+  const d = await r.json();
+  if (!d.ok) { alert(d.error || 'Could not start'); return; }
+  document.getElementById('prepareStartBtn').disabled = true;
+  document.getElementById('prepareStopBtn').style.display = 'inline-block';
+  document.getElementById('prepareProgressWrap').style.display = 'block';
+  document.getElementById('prepareLabel').textContent = `Starting ${d.workers} Ollama instances…`;
+  _preparePoller = setInterval(pollPrepare, 1500);
+}
+
+async function stopPrepare() {
+  await fetch('/outreach/prepare/stop', { method: 'POST' });
+  document.getElementById('prepareStopBtn').disabled = true;
+}
+
+async function pollPrepare() {
+  const r = await fetch('/outreach/prepare/status');
+  const d = await r.json();
+
+  document.getElementById('prepareReadyCount').textContent = d.ready_count;
+  document.getElementById('statReady').textContent = d.ready_count.toLocaleString();
+
+  if (d.total > 0) {
+    const pct = Math.round(d.done / d.total * 100);
+    document.getElementById('prepareBar').style.width = pct + '%';
+    document.getElementById('prepareLabel').textContent =
+      `${d.done.toLocaleString()} / ${d.total.toLocaleString()} prepared — ${d.ready} ready, ${d.failed} failed`;
+  }
+  const currentsEl = document.getElementById('prepareCurrent');
+  if (d.currents && Object.keys(d.currents).length > 0) {
+    currentsEl.innerHTML = Object.entries(d.currents)
+      .map(([port, company]) => `<span style="font-size:11px; color:#8b949e;">⚙ Worker :${port} — ${company}</span>`)
+      .join('');
+  } else if (d.current) {
+    currentsEl.innerHTML = `<span style="font-size:11px; color:#8b949e;">⚙ ${d.current}</span>`;
+  }
+
+  if (!d.running) {
+    clearInterval(_preparePoller);
+    document.getElementById('prepareStartBtn').disabled = false;
+    document.getElementById('prepareStopBtn').style.display = 'none';
+    document.getElementById('prepareStopBtn').disabled = false;
+    const label = document.getElementById('prepareLabel');
+    if (d.error) {
+      label.textContent = `Error: ${d.error}`;
+    } else {
+      label.textContent = d.total > 0
+        ? `Done — ${d.ready} letters ready, ${d.failed} failed.`
+        : 'Nothing to prepare (all contacts already drafted or sent).';
+    }
+    document.getElementById('prepareCurrent').textContent = '';
+  }
+}
+
+// ── Batch send + countdown ─────────────────────────────────────────────────
+let _cdTimer = null;
+
+async function checkCooldown() {
+  const r = await fetch('/outreach/cooldown');
+  const d = await r.json();
+  startCooldown(d.remaining_secs);
+}
+
+function startCooldown(secs) {
+  const box = document.getElementById('batchCooldown');
+  const btn = document.getElementById('batchSendBtn');
+  if (_cdTimer) clearInterval(_cdTimer);
+  if (secs <= 0) { box.style.display = 'none'; btn.disabled = false; return; }
+  box.style.display = 'block';
+  btn.disabled = true;
+  let remaining = secs;
+  document.getElementById('cdTime').textContent = fmtCd(remaining);
+  _cdTimer = setInterval(() => {
+    remaining--;
+    document.getElementById('cdTime').textContent = fmtCd(remaining);
+    if (remaining <= 0) { clearInterval(_cdTimer); box.style.display = 'none'; btn.disabled = false; }
+  }, 1000);
+}
+
+function fmtCd(s) {
+  const h   = String(Math.floor(s / 3600)).padStart(2,'0');
+  const m   = String(Math.floor((s % 3600) / 60)).padStart(2,'0');
+  const sec = String(s % 60).padStart(2,'0');
+  return `${h}:${m}:${sec}`;
+}
+
+async function stopBatch() {
+  await fetch('/outreach/send-batch/stop', { method: 'POST' });
+  document.getElementById('batchStopBtn').disabled = true;
+  document.getElementById('batchStopBtn').textContent = 'Stopping…';
+}
+
+async function resetCooldown() {
+  if (!confirm('Reset the cooldown? You will be able to send a new batch immediately.')) return;
+  await fetch('/outreach/cooldown/reset', { method: 'POST' });
+  startCooldown(0);
+}
+
+function startBatchSend() {
+  const limit   = parseInt(document.getElementById('batchSizeInput').value, 10);
+  if (!limit || limit < 1) { alert('Enter a valid number of emails to send.'); return; }
+  const email   = document.getElementById('senderEmail').value.trim();
+  const pass    = document.getElementById('senderPassword').value.trim();
+  const replyTo = document.getElementById('replyTo').value.trim();
+  if (!email || !pass) { alert('Enter your Gmail and app password in the Configuration section first.'); return; }
+  if (!confirm(`Send up to ${limit.toLocaleString()} prepared emails?`)) return;
+
+  const btn     = document.getElementById('batchSendBtn');
+  const stopBtn = document.getElementById('batchStopBtn');
+  const wrap    = document.getElementById('batchProgressWrap');
+  const log     = document.getElementById('batchLog');
+  const bar     = document.getElementById('batchProgressBar');
+  const label   = document.getElementById('batchProgressLabel');
+
+  btn.disabled = true;
+  stopBtn.style.display = 'inline-block';
+  stopBtn.disabled = false;
+  stopBtn.textContent = 'Stop';
+  wrap.style.display = 'block';
+  log.textContent = '';
+  bar.style.width = '0%';
+
+  fetch('/outreach/send-batch', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email, password: pass, limit, reply_to: replyTo})
+  }).then(resp => {
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', total = 0;
+    function read() {
+      reader.read().then(({done, value}) => {
+        if (done) return;
+        buffer += decoder.decode(value);
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        lines.forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          const d = JSON.parse(line.slice(6));
+          if (d.error) {
+            if (d.error === 'cooldown') { startCooldown(d.remaining_secs); wrap.style.display = 'none'; }
+            else log.textContent += `ERROR: ${d.error}\n`;
+            btn.disabled = false; stopBtn.style.display = 'none';
+            return;
+          }
+          if (d.step === 'start') {
+            total = d.total;
+            label.textContent = `Sending ${total.toLocaleString()} emails…`;
+          } else if (d.step === 'sending') {
+            log.textContent += `[${d.index}/${d.total}] ${d.company}…\n`;
+          } else if (d.step === 'done') {
+            log.textContent += `  ${d.status === 'sent' ? '✓' : '✗'} ${d.status.toUpperCase()}${d.error ? ': ' + d.error : ''}\n`;
+            bar.style.width = (d.index / total * 100) + '%';
+            // update ready count live
+            const el = document.getElementById('statReady');
+            const cur = parseInt(el.textContent.replace(/,/g,'')) || 0;
+            if (d.status === 'sent' && cur > 0) el.textContent = (cur - 1).toLocaleString();
+          } else if (d.step === 'stopped') {
+            log.textContent += `\nStopped after ${d.index} emails.\n`;
+            label.textContent = 'Stopped.';
+            btn.disabled = false; stopBtn.style.display = 'none';
+            table.ajax.reload();
+          } else if (d.step === 'finished') {
+            log.textContent += `\nDone — ${d.sent} sent out of ${d.total}.\n`;
+            label.textContent = `Batch complete — ${d.sent} sent.`;
+            btn.disabled = false; stopBtn.style.display = 'none';
+            startCooldown(86400);
+            table.ajax.reload();
+          }
+          log.scrollTop = log.scrollHeight;
+        });
+        read();
+      });
+    }
+    read();
+  });
+}
+
+// Poll prepare status on load in case a run is already in progress
+(async function initPrepareState() {
+  const r = await fetch('/outreach/prepare/status');
+  const d = await r.json();
+  document.getElementById('statReady').textContent = d.ready_count.toLocaleString();
+  document.getElementById('prepareReadyCount').textContent = d.ready_count;
+  if (d.running) {
+    document.getElementById('prepareStartBtn').disabled = true;
+    document.getElementById('prepareStopBtn').style.display = 'inline-block';
+    document.getElementById('prepareProgressWrap').style.display = 'block';
+    _preparePoller = setInterval(pollPrepare, 1500);
+  }
+})();
+
+checkCooldown();
+</script>
+{% endblock %}
