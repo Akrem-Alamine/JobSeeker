@@ -2,122 +2,137 @@
 {% block content %}
 
 <div class="d-flex align-items-center justify-content-between mb-4">
-  <h1 class="section-title mb-0"><i class="bi bi-reply-fill me-2 text-primary"></i>Responses</h1>
+  <h1 class="section-title mb-0">
+    <i class="bi bi-envelope-x-fill me-2 text-danger"></i>Responses
+  </h1>
+  <span id="runnerBadge" style="
+    display:inline-block; padding:4px 12px; border-radius:12px;
+    font-size:12px; font-weight:600; background:#238636; color:#fff;">
+    ● Active
+  </span>
 </div>
 
 <!-- Stats -->
 <div class="row g-3 mb-4">
-  {% set types = [
-    ('human_reply',      'Human Replies',      'bi-person-fill',      '#3fb950'),
-    ('auto_reply',       'Auto Replies',        'bi-robot',            '#d29922'),
-    ('delivery_failure', 'Delivery Failures',  'bi-x-circle-fill',    '#f85149'),
-  ] %}
   <div class="col-md-3">
     <div class="stat-card text-center">
-      <div class="label">Pending</div>
-      <div class="value">{{ by_type.values() | sum }}</div>
+      <div class="label" style="color:#f85149;">Bounces Removed</div>
+      <div class="value" style="color:#f85149;">{{ total_bounces | format_num }}</div>
+      <div class="sub">delivery failures cleared</div>
     </div>
   </div>
-  {% for key, label, icon, color in types %}
   <div class="col-md-3">
     <div class="stat-card text-center">
-      <div class="label" style="color:{{ color }};"><i class="bi {{ icon }} me-1"></i>{{ label }}</div>
-      <div class="value" style="color:{{ color }};">{{ by_type.get(key, 0) }}</div>
+      <div class="label" style="color:#e3b341;">Auto-Replies Archived</div>
+      <div class="value" style="color:#e3b341;">{{ total_autos | format_num }}</div>
+      <div class="sub">moved to Auto folder</div>
     </div>
   </div>
-  {% endfor %}
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="label" style="color:#3fb950;">Contacts Cleaned</div>
+      <div class="value" style="color:#3fb950;">{{ contacts_removed | format_num }}</div>
+      <div class="sub">removed from database</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card text-center">
+      <div class="label" style="color:#58a6ff;">Total Scans</div>
+      <div class="value" id="totalRuns" style="color:#58a6ff;">{{ runner.total_runs }}</div>
+      <div class="sub">since last restart</div>
+    </div>
+  </div>
 </div>
 
-<!-- Config + Actions -->
+<!-- Auto-scanner status -->
 <div class="card mb-4">
-  <div class="card-header"><i class="bi bi-gear-fill me-2"></i>Gmail Account</div>
+  <div class="card-header"><i class="bi bi-clock-fill me-2 text-secondary"></i>Auto-Scanner — every 15 minutes</div>
   <div class="card-body">
-    <div class="row g-3 align-items-end">
-      <div class="col-md-4">
-        <label class="form-label text-secondary" style="font-size:12px;">GMAIL ADDRESS</label>
-        <input id="rEmail" type="email" class="form-control form-control-sm"
-               placeholder="you@gmail.com"
-               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+    <div class="row g-4">
+      <div class="col-md-3">
+        <div style="font-size:11px; color:#8b949e; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Status</div>
+        <div id="statusText" style="font-size:14px; color:#3fb950;">Idle</div>
       </div>
-      <div class="col-md-4">
-        <label class="form-label text-secondary" style="font-size:12px;">APP PASSWORD</label>
-        <input id="rPassword" type="password" class="form-control form-control-sm"
-               placeholder="xxxx xxxx xxxx xxxx"
-               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
+      <div class="col-md-3">
+        <div style="font-size:11px; color:#8b949e; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Last Scan</div>
+        <div id="lastRunText" style="font-size:14px; color:#e6edf3;">
+          {{ runner.last_run or 'Not yet run' }}
+        </div>
       </div>
-      <div class="col-md-4 d-flex gap-2 align-items-center flex-wrap">
-        <button id="collectBtn" class="btn btn-run px-4" onclick="collectResponses()">
-          <i class="bi bi-cloud-download me-2"></i>Collect Responses
-        </button>
-        <button id="processBtn" class="btn btn-secondary px-3" onclick="processAll()"
-                {% if not responses %}disabled{% endif %}>
-          <i class="bi bi-lightning-charge-fill me-1"></i>Process All
-        </button>
+      <div class="col-md-3">
+        <div style="font-size:11px; color:#8b949e; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Next Scan</div>
+        <div id="nextRunText" style="font-size:14px; color:#e6edf3;">—</div>
+      </div>
+      <div class="col-md-3">
+        <div style="font-size:11px; color:#8b949e; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Last Result</div>
+        <div id="lastResultText" style="font-size:14px; color:#8b949e;">
+          {% if runner.last_result %}
+            <span style="color:#f85149;">{{ runner.last_result.bounces }}b</span>
+            <span style="color:#8b949e;"> · </span>
+            <span style="color:#e3b341;">{{ runner.last_result.auto_replies }}ar</span>
+            {% if runner.last_result.errors %}
+              <span style="color:#8b949e;"> · </span>
+              <span style="color:#f85149;">{{ runner.last_result.errors }}err</span>
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </div>
       </div>
     </div>
-
-    <div id="actionWrap" style="display:none; margin-top:16px;">
-      <div style="font-size:12px; color:#8b949e; margin-bottom:6px;" id="actionLabel">Working…</div>
-      <div class="progress mb-2" style="height:6px;">
-        <div id="actionBar" class="progress-bar bg-success" style="width:0%"></div>
-      </div>
-      <pre id="actionLog" class="log-output" style="max-height:200px; font-size:11px;"></pre>
+    {% if runner.error %}
+    <div id="errorText" style="margin-top:12px; font-size:12px; color:#f85149; background:#1a0a0a; padding:8px 12px; border-radius:6px; border-left:3px solid #f85149;">
+      <i class="bi bi-exclamation-triangle-fill me-1"></i>{{ runner.error }}
     </div>
+    {% else %}
+    <div id="errorText" style="display:none;"></div>
+    {% endif %}
+    {% if pending_count > 0 %}
+    <div style="margin-top:10px; font-size:12px; color:#e3b341;">
+      <i class="bi bi-hourglass-split me-1"></i>{{ pending_count }} item(s) pending — will be processed on next scan.
+    </div>
+    {% endif %}
   </div>
 </div>
 
-<!-- Responses table -->
+<!-- Recent activity -->
 <div class="card">
   <div class="card-header d-flex align-items-center justify-content-between">
-    <span><i class="bi bi-table me-2"></i>Pending Responses</span>
-    <span style="font-size:12px; color:#8b949e;">{{ responses|length }} total — processed ones are hidden</span>
+    <span><i class="bi bi-activity me-2"></i>Recent Activity</span>
+    <span style="font-size:12px; color:#8b949e;">last 30 processed</span>
   </div>
   <div class="card-body p-0">
-    {% if responses %}
-    <table class="table table-sm mb-0" id="respTable">
+    {% if recent %}
+    <table class="table table-sm mb-0">
       <thead>
         <tr>
-          <th>Type</th>
-          <th>From</th>
+          <th style="width:28px;"></th>
+          <th>Email</th>
           <th>Subject</th>
-          <th>Received</th>
-          <th style="width:220px;">Actions</th>
+          <th>Company</th>
+          <th style="white-space:nowrap;">Processed At</th>
         </tr>
       </thead>
       <tbody>
-        {% for r in responses %}
-        <tr id="row-{{ r.id }}">
-          <td id="type-{{ r.id }}">
-            {% if r.type == 'human_reply' %}
-              <span class="badge" style="background:#1a7f37;">Human Reply</span>
-            {% elif r.type == 'auto_reply' %}
-              <span class="badge" style="background:#9e6a03;">Auto Reply</span>
-            {% elif r.type == 'delivery_failure' %}
-              <span class="badge" style="background:#b91c1c;">Failure</span>
+        {% for r in recent %}
+        <tr>
+          <td>
+            {% if r.type == 'delivery_failure' %}
+              <i class="bi bi-x-circle-fill" style="color:#f85149;" title="Delivery Failure"></i>
             {% else %}
-              <span class="badge" style="background:#30363d;">{{ r.type }}</span>
+              <i class="bi bi-reply-fill" style="color:#e3b341;" title="Auto-Reply"></i>
             {% endif %}
           </td>
-          <td style="font-size:12px;">{{ r.from_email }}</td>
-          <td style="font-size:12px; color:#8b949e; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ r.subject }}">{{ r.subject }}</td>
-          <td style="font-size:12px; color:#8b949e; white-space:nowrap;">{{ r.received_at[:16] if r.received_at else '—' }}</td>
-          <td>
-            <div class="d-flex gap-1 flex-wrap">
-              <button class="btn btn-sm px-2 py-0" style="background:#1a7f37; color:#fff; font-size:11px;"
-                      onclick="processOne({{ r.id }}, this)" title="Mark as Important / delete / remove from DB">
-                <i class="bi bi-play-fill"></i> Process
-              </button>
-              <div class="dropdown d-inline-block">
-                <button class="btn btn-sm px-2 py-0 dropdown-toggle" style="background:#21262d; color:#8b949e; font-size:11px; border:1px solid #30363d;"
-                        data-bs-toggle="dropdown">Type</button>
-                <ul class="dropdown-menu dropdown-menu-end" style="background:#161b22; border-color:#30363d; font-size:12px; min-width:150px;">
-                  <li><a class="dropdown-item" href="#" style="color:#3fb950;" onclick="reclassify({{ r.id }}, 'human_reply', this); return false;">👤 Human Reply</a></li>
-                  <li><a class="dropdown-item" href="#" style="color:#d29922;" onclick="reclassify({{ r.id }}, 'auto_reply', this); return false;">🤖 Auto Reply</a></li>
-                  <li><a class="dropdown-item" href="#" style="color:#f85149;" onclick="reclassify({{ r.id }}, 'delivery_failure', this); return false;">❌ Delivery Failure</a></li>
-                </ul>
-              </div>
-            </div>
-            <div id="status-{{ r.id }}" style="font-size:11px; color:#8b949e; margin-top:2px;"></div>
+          <td style="font-size:12px; font-family:monospace;
+                     color:{{ '#f85149' if r.type == 'delivery_failure' else '#e3b341' }};">
+            {{ r.new_email or r.from_email }}
+          </td>
+          <td style="font-size:12px; color:#8b949e; max-width:280px;
+                     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+              title="{{ r.subject }}">{{ r.subject }}</td>
+          <td style="font-size:12px; color:#8b949e;">{{ r.company or '—' }}</td>
+          <td style="font-size:12px; color:#8b949e; white-space:nowrap;">
+            {{ (r.processed_at or r.received_at or '')[:16] or '—' }}
           </td>
         </tr>
         {% endfor %}
@@ -125,8 +140,8 @@
     </table>
     {% else %}
     <div style="padding:40px; text-align:center; color:#8b949e;">
-      <i class="bi bi-inbox" style="font-size:2rem; display:block; margin-bottom:8px;"></i>
-      No pending responses. Click <strong>Collect Responses</strong> to scan Gmail.
+      <i class="bi bi-clock" style="font-size:2rem; display:block; margin-bottom:8px; color:#30363d;"></i>
+      No processed responses yet — scanner runs automatically every 15 minutes.
     </div>
     {% endif %}
   </div>
@@ -135,198 +150,79 @@
 {% endblock %}
 {% block scripts %}
 <script>
-// Auto-load credentials from outreach page (shared localStorage)
-(function() {
-  const email = localStorage.getItem('outreach_email');
-  const pass  = localStorage.getItem('outreach_password');
-  if (email) document.getElementById('rEmail').value = email;
-  if (pass)  document.getElementById('rPassword').value = pass;
-})();
+const _runnerInit = {{ runner | tojson }};
+let   _runnerState = Object.assign({}, _runnerInit);
 
-function _creds() {
-  return {
-    email:    document.getElementById('rEmail').value.trim(),
-    password: document.getElementById('rPassword').value.trim(),
-  };
+function _relTime(iso) {
+  if (!iso) return '—';
+  const diff = Math.round((Date.now() - new Date(iso)) / 1000);
+  if (diff <  60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  return Math.floor(diff / 3600) + 'h ago';
 }
 
-function _setUi(working) {
-  document.getElementById('collectBtn').disabled = working;
-  document.getElementById('processBtn').disabled = working;
-  document.getElementById('actionWrap').style.display = working ? 'block' : 'block';
+function _until(iso) {
+  if (!iso) return '—';
+  const diff = Math.round((new Date(iso) - Date.now()) / 1000);
+  if (diff <= 0) return 'any moment';
+  if (diff < 60) return 'in ' + diff + 's';
+  return 'in ' + Math.floor(diff / 60) + 'm ' + String(diff % 60).padStart(2, '0') + 's';
 }
 
-function collectResponses() {
-  const { email, password } = _creds();
-  if (!email || !password) { alert('Enter Gmail credentials first.'); return; }
+function _renderRunner(s) {
+  const badge  = document.getElementById('runnerBadge');
+  const status = document.getElementById('statusText');
+  const errBox = document.getElementById('errorText');
 
-  const log   = document.getElementById('actionLog');
-  const bar   = document.getElementById('actionBar');
-  const label = document.getElementById('actionLabel');
-  log.textContent = '';
-  bar.style.width = '0%';
-  document.getElementById('actionWrap').style.display = 'block';
-  document.getElementById('collectBtn').disabled = true;
-  document.getElementById('processBtn').disabled = true;
-  label.textContent = 'Connecting to Gmail…';
+  if (s.running) {
+    badge.style.background = '#1f6feb';
+    badge.textContent      = '⟳ Scanning…';
+    status.style.color     = '#58a6ff';
+    status.textContent     = 'Scanning inbox…';
+  } else if (s.error) {
+    badge.style.background = '#b91c1c';
+    badge.textContent      = '✗ Error';
+    status.style.color     = '#f85149';
+    status.textContent     = 'Error — see below';
+    errBox.style.display   = 'block';
+    errBox.innerHTML       = '<i class="bi bi-exclamation-triangle-fill me-1"></i>' + s.error;
+  } else {
+    badge.style.background = '#238636';
+    badge.textContent      = '● Active';
+    status.style.color     = '#3fb950';
+    status.textContent     = 'Idle — next scan soon';
+    if (errBox) errBox.style.display = 'none';
+  }
 
-  fetch('/responses/collect', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({email, password}),
-  }).then(resp => {
-    const reader  = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    function read() {
-      reader.read().then(({done, value}) => {
-        if (done) return;
-        buffer += decoder.decode(value);
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        lines.forEach(line => {
-          if (!line.startsWith('data: ')) return;
-          const d = JSON.parse(line.slice(6));
-          if (d.error) {
-            log.textContent += `ERROR: ${d.error}\n`;
-            document.getElementById('collectBtn').disabled = false;
-            return;
-          }
-          if (d.step === 'connecting') { label.textContent = 'Connecting…'; bar.style.width = '20%'; }
-          if (d.step === 'scanning')   { label.textContent = 'Scanning folders…'; bar.style.width = '60%'; }
-          if (d.step === 'done') {
-            bar.style.width = '100%';
-            label.textContent = `Collected ${d.count} new response(s).`;
-            if (d.count > 0) {
-              d.items.forEach(item => {
-                log.textContent += `  [${item.type}] ${item.from_email} — ${item.subject}\n`;
-              });
-              log.textContent += `\nReload the page to see them in the table.\n`;
-              setTimeout(() => location.reload(), 1500);
-            } else {
-              log.textContent += 'No new responses found.\n';
-              document.getElementById('collectBtn').disabled = false;
-              document.getElementById('processBtn').disabled = false;
-            }
-          }
-          log.scrollTop = log.scrollHeight;
-        });
-        read();
-      });
-    }
-    read();
-  });
+  document.getElementById('lastRunText').textContent = _relTime(s.last_run);
+  document.getElementById('nextRunText').textContent = _until(s.next_run);
+  document.getElementById('totalRuns').textContent   = s.total_runs || 0;
+
+  if (s.last_result) {
+    const r = s.last_result;
+    let txt = `<span style="color:#f85149">${r.bounces}b</span>`
+            + `<span style="color:#8b949e"> · </span>`
+            + `<span style="color:#e3b341">${r.auto_replies}ar</span>`;
+    if (r.errors) txt += `<span style="color:#8b949e"> · </span><span style="color:#f85149">${r.errors}err</span>`;
+    document.getElementById('lastResultText').innerHTML = txt;
+  }
 }
 
-function processAll() {
-  const { email, password } = _creds();
-  if (!email || !password) { alert('Enter Gmail credentials first.'); return; }
+// Initial render
+_renderRunner(_runnerState);
 
-  const log   = document.getElementById('actionLog');
-  const bar   = document.getElementById('actionBar');
-  const label = document.getElementById('actionLabel');
-  log.textContent = '';
-  bar.style.width = '0%';
-  document.getElementById('actionWrap').style.display = 'block';
-  document.getElementById('collectBtn').disabled = true;
-  document.getElementById('processBtn').disabled = true;
-  label.textContent = 'Processing responses…';
+// Poll every 30s and update times every 15s
+setInterval(async () => {
+  try {
+    const r = await fetch('/responses/runner-status');
+    _runnerState = await r.json();
+    _renderRunner(_runnerState);
+  } catch (_) {}
+}, 30000);
 
-  const TYPE_ICONS = {
-    human_reply:      '👤',
-    auto_reply:       '🤖',
-    delivery_failure: '❌',
-  };
-
-  fetch('/responses/process', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({email, password}),
-  }).then(resp => {
-    const reader  = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let total  = 0;
-    function read() {
-      reader.read().then(({done, value}) => {
-        if (done) return;
-        buffer += decoder.decode(value);
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        lines.forEach(line => {
-          if (!line.startsWith('data: ')) return;
-          const d = JSON.parse(line.slice(6));
-          if (d.error) {
-            log.textContent += `ERROR: ${d.error}\n`;
-            document.getElementById('collectBtn').disabled = false;
-            document.getElementById('processBtn').disabled = false;
-            return;
-          }
-          if (d.step === 'start') {
-            total = d.total;
-            label.textContent = `Processing ${total} response(s)…`;
-          }
-          if (d.step === 'item') {
-            const icon = TYPE_ICONS[d.type] || '•';
-            log.textContent += `${icon} [${d.type}] ${d.email} → ${d.result}\n`;
-            bar.style.width = (d.index / total * 100) + '%';
-          }
-          if (d.step === 'done') {
-            bar.style.width = '100%';
-            label.textContent = d.total > 0 ? `Done — ${d.total} response(s) processed.` : 'Nothing to process.';
-            document.getElementById('collectBtn').disabled = false;
-            document.getElementById('processBtn').disabled = false;
-            if (d.total > 0) setTimeout(() => location.reload(), 1500);
-          }
-          log.scrollTop = log.scrollHeight;
-        });
-        read();
-      });
-    }
-    read();
-  });
-}
-function processOne(id, btn) {
-  const { email, password } = _creds();
-  if (!email || !password) { alert('Enter Gmail credentials first.'); return; }
-  btn.disabled = true;
-  btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-  const status = document.getElementById('status-' + id);
-  status.textContent = 'working…';
-  fetch('/responses/process-one/' + id, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({email, password}),
-  }).then(r => r.json()).then(d => {
-    if (d.error) {
-      status.textContent = '✗ ' + d.error;
-      status.style.color = '#f85149';
-      btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-play-fill"></i> Process';
-    } else {
-      status.textContent = '✓ ' + d.result;
-      status.style.color = '#3fb950';
-      const row = document.getElementById('row-' + id);
-      setTimeout(() => row.style.opacity = '0.35', 800);
-    }
-  });
-}
-
-function reclassify(id, newType, link) {
-  const labels = {human_reply: '👤 Human Reply', auto_reply: '🤖 Auto Reply', delivery_failure: '❌ Delivery Failure'};
-  const colors = {human_reply: '#1a7f37', auto_reply: '#9e6a03', delivery_failure: '#b91c1c'};
-  fetch('/responses/reclassify/' + id, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({type: newType}),
-  }).then(r => r.json()).then(d => {
-    if (d.ok) {
-      const cell = document.getElementById('type-' + id);
-      cell.innerHTML = `<span class="badge" style="background:${colors[newType]};">${labels[newType].slice(3)}</span>`;
-      document.getElementById('status-' + id).textContent = 'reclassified';
-    }
-  });
-}
-
+setInterval(() => {
+  document.getElementById('lastRunText').textContent = _relTime(_runnerState.last_run);
+  document.getElementById('nextRunText').textContent = _until(_runnerState.next_run);
+}, 15000);
 </script>
 {% endblock %}

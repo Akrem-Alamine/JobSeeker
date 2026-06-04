@@ -51,24 +51,50 @@ def send_with_server(
 ) -> tuple[bool, str, smtplib.SMTP]:
     """
     Send one email on an existing SMTP session.
-    Reconnects once automatically if the connection was dropped.
+    Reconnects up to 3 times on any connection error.
     Returns (success, error, server) — server may be a new instance after reconnect.
     """
-    msg = _build_message(sender_email, recipient_email, candidate_name, letter_body, cv_path, reply_to)
-    for attempt in range(2):
+    import time
+
+    def _is_gmail_limit(code, raw_msg):
+        text = raw_msg.decode(errors='replace') if isinstance(raw_msg, bytes) else str(raw_msg)
+        return code == 550 and '5.4.5' in text
+
+    email_msg = _build_message(sender_email, recipient_email, candidate_name, letter_body, cv_path, reply_to)
+    for attempt in range(3):
         try:
-            server.sendmail(sender_email, recipient_email, msg.as_string())
+            server.sendmail(sender_email, recipient_email, email_msg.as_string())
             return True, "", server
-        except smtplib.SMTPRecipientsRefused:
+        except smtplib.SMTPRecipientsRefused as e:
+            for addr, (code, raw) in e.recipients.items():
+                if _is_gmail_limit(code, raw):
+                    return False, 'DAILY_LIMIT_EXCEEDED', server
             return False, f"Recipient refused: {recipient_email}", server
+        except smtplib.SMTPSenderRefused as e:
+            if _is_gmail_limit(e.smtp_code, e.smtp_error):
+                return False, 'DAILY_LIMIT_EXCEEDED', server
+            return False, f"Sender refused: {e.smtp_error}", server
+        except smtplib.SMTPDataError as e:
+            if _is_gmail_limit(e.smtp_code, e.smtp_error):
+                return False, 'DAILY_LIMIT_EXCEEDED', server
+            code = e.smtp_code
+            raw  = e.smtp_error.decode(errors='replace') if isinstance(e.smtp_error, bytes) else str(e.smtp_error)
+            if code in (421, 450) and attempt < 2:
+                time.sleep(30 * (attempt + 1))
+                try:
+                    server = open_smtp(sender_email, app_password)
+                    continue
+                except Exception as re:
+                    return False, f"Reconnect failed after rate limit: {re}", server
+            return False, f"SMTP {code}: {raw}", server
         except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectionError, OSError):
-            if attempt == 0:
+            if attempt < 2:
                 try:
                     server = open_smtp(sender_email, app_password)
                     continue
                 except Exception as e:
                     return False, f"Reconnect failed: {e}", server
-            return False, "Connection lost after reconnect attempt", server
+            return False, "Connection lost after reconnect attempts", server
         except Exception as e:
             return False, str(e), server
     return False, "Send failed", server

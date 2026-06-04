@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context
@@ -25,11 +25,24 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 DB_PATH        = "output/leads.db"
 UPLOAD_DIR     = Path("output/uploads")
-LAST_BATCH_FILE = Path("output/last_batch.txt")
+SESSION_FILE   = Path("output/session_state.json")
 UPLOAD_DIR.mkdir(exist_ok=True)
-BATCH_SIZE     = 1500
-COOLDOWN_SECS  = 86400   # 24 hours
-_stop_flag     = False
+BATCH_SIZE      = 1500
+SESSION_LIMIT   = 1500   # emails per session before cooldown
+COOLDOWN_SECS   = 86400  # 24h cooldown once limit is reached
+RUNNER_INTERVAL = 15 * 60  # response auto-scanner interval (15 min)
+_stop_flag      = False
+
+# ── Response auto-runner state ─────────────────────────────────────────────────
+_runner_lock  = threading.Lock()
+_runner_state: dict = {
+    'running':     False,
+    'last_run':    None,
+    'last_result': None,
+    'next_run':    None,
+    'error':       '',
+    'total_runs':  0,
+}
 
 # ── Prepare-letters background thread ─────────────────────────────────────────
 _prepare_stop        = False
@@ -237,19 +250,112 @@ def _run_prepare(num_workers: int = 1):
         _prepare_status.update({'running': False, 'current': ''})
 
 
-def _cooldown_remaining() -> int:
-    if not LAST_BATCH_FILE.exists():
-        return 0
+def _load_session() -> dict:
     try:
-        ts      = float(LAST_BATCH_FILE.read_text().strip())
-        elapsed = time.time() - ts
-        return max(0, int(COOLDOWN_SECS - elapsed))
+        if SESSION_FILE.exists():
+            return json.loads(SESSION_FILE.read_text())
+    except Exception:
+        pass
+    return {"cooldown_start": None}
+
+
+def _save_session(state: dict):
+    SESSION_FILE.write_text(json.dumps(state))
+
+
+def _sent_today() -> int:
+    """Count emails successfully sent today (calendar day, UTC)."""
+    try:
+        conn = get_conn()
+        n = conn.execute(
+            "SELECT COUNT(*) FROM outreach WHERE status='sent' AND DATE(sent_at)=DATE('now')"
+        ).fetchone()[0]
+        conn.close()
+        return n
     except Exception:
         return 0
 
 
-def _save_batch_timestamp():
-    LAST_BATCH_FILE.write_text(str(time.time()))
+def _session_stats() -> dict:
+    """Return {sent, remaining, cooldown_secs_left}."""
+    state    = _load_session()
+    sent     = _sent_today()
+    cd_start = state.get("cooldown_start")
+
+    cooldown_left = 0
+    if cd_start:
+        elapsed = time.time() - cd_start
+        cooldown_left = max(0, int(COOLDOWN_SECS - elapsed))
+        if cooldown_left == 0:
+            state = {"cooldown_start": None}
+            _save_session(state)
+
+    remaining = max(0, SESSION_LIMIT - sent)
+    return {"sent": sent, "remaining": remaining, "cooldown_secs_left": cooldown_left}
+
+
+def _cooldown_remaining() -> int:
+    return _session_stats()["cooldown_secs_left"]
+
+
+def _record_sent(count: int):
+    """Trigger cooldown if today's sent total just reached the limit."""
+    state = _load_session()
+    if state.get("cooldown_start"):
+        return
+    if _sent_today() >= SESSION_LIMIT:
+        state["cooldown_start"] = time.time()
+        _save_session(state)
+
+
+def _load_dotenv() -> dict:
+    env: dict = {}
+    try:
+        for line in Path('.env').read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                k, _, v = line.partition('=')
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return env
+
+
+def _run_response_loop():
+    from pipeline.response_collector import connect_imap, collect_and_process, init_responses_table
+    while True:
+        with _runner_lock:
+            _runner_state['running'] = True
+            _runner_state['error']   = ''
+        try:
+            env      = _load_dotenv()
+            email    = env.get('EMAIL_ADDRESS', '').strip()
+            password = env.get('EMAIL_PASSWORD', '').strip().replace(' ', '')
+            if not email or not password:
+                raise ValueError('No credentials found in .env')
+            conn = get_conn()
+            init_responses_table(conn)
+            try:
+                mail   = connect_imap(email, password)
+                result = collect_and_process(mail, email, conn)
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+                with _runner_lock:
+                    _runner_state['last_result'] = result
+                    _runner_state['total_runs'] += 1
+            finally:
+                conn.close()
+        except Exception as exc:
+            with _runner_lock:
+                _runner_state['error'] = str(exc)
+        now = datetime.now(timezone.utc)
+        with _runner_lock:
+            _runner_state['running']  = False
+            _runner_state['last_run'] = now.isoformat()
+            _runner_state['next_run'] = (now + timedelta(seconds=RUNNER_INTERVAL)).isoformat()
+        time.sleep(RUNNER_INTERVAL)
 
 
 # ── Jinja filter ──────────────────────────────────────────────────────────────
@@ -594,8 +700,7 @@ def export_csv(mode):
 # ── Outreach ──────────────────────────────────────────────────────────────────
 
 OUTREACH_FILTER = """
-    email_status = 'deliverable'
-    AND email NOT LIKE '_noemail_%'
+    email NOT LIKE '_noemail_%'
     AND email != ''
     AND company IS NOT NULL AND company != ''
 """
@@ -605,20 +710,44 @@ def responses_page():
     from pipeline.response_collector import init_responses_table
     conn = get_conn()
     init_responses_table(conn)
-    by_type = {r[0]: r[1] for r in conn.execute(
-        "SELECT type, COUNT(*) FROM responses WHERE processed=0 GROUP BY type"
-    ).fetchall()}
-    rows = conn.execute("""
-        SELECT r.id, r.from_email, r.from_name, r.subject, r.received_at,
-               r.type, r.new_email, r.folder, r.processed, c.company
+    total_bounces = conn.execute(
+        "SELECT COUNT(*) FROM responses WHERE type='delivery_failure' AND processed=1"
+    ).fetchone()[0]
+    total_autos = conn.execute(
+        "SELECT COUNT(*) FROM responses WHERE type='auto_reply' AND processed=1"
+    ).fetchone()[0]
+    contacts_removed = conn.execute(
+        "SELECT COUNT(*) FROM responses WHERE type='delivery_failure' AND processed=1 AND contact_id IS NOT NULL"
+    ).fetchone()[0]
+    pending_count = conn.execute(
+        "SELECT COUNT(*) FROM responses WHERE processed=0"
+    ).fetchone()[0]
+    recent = [dict(r) for r in conn.execute("""
+        SELECT r.id, r.type, r.from_email, r.new_email, r.subject,
+               r.received_at, r.processed_at, c.company
         FROM responses r
         LEFT JOIN contacts c ON c.id = r.contact_id
-        WHERE r.processed = 0
-        ORDER BY r.type, r.received_at DESC
-    """).fetchall()
+        WHERE r.processed = 1
+        ORDER BY r.id DESC
+        LIMIT 30
+    """).fetchall()]
     conn.close()
+    with _runner_lock:
+        runner = dict(_runner_state)
     return render_template("responses.html", active="responses", title="Responses",
-                           by_type=by_type, responses=[dict(r) for r in rows])
+                           total_bounces=total_bounces,
+                           total_autos=total_autos,
+                           contacts_removed=contacts_removed,
+                           pending_count=pending_count,
+                           recent=recent,
+                           runner=runner)
+
+
+@app.route("/responses/runner-status")
+def responses_runner_status():
+    with _runner_lock:
+        state = dict(_runner_state)
+    return jsonify(state)
 
 
 @app.route("/responses/collect", methods=["POST"])
@@ -943,14 +1072,12 @@ def outreach_send():
 
 @app.route("/outreach/cooldown")
 def outreach_cooldown():
-    return jsonify({"remaining_secs": _cooldown_remaining()})
-
-
-@app.route("/outreach/cooldown/reset", methods=["POST"])
-def outreach_cooldown_reset():
-    if LAST_BATCH_FILE.exists():
-        LAST_BATCH_FILE.unlink()
-    return jsonify({"ok": True})
+    stats = _session_stats()
+    return jsonify({
+        "remaining_secs": stats["cooldown_secs_left"],
+        "sent":           stats["sent"],
+        "remaining":      stats["remaining"],
+    })
 
 
 @app.route("/outreach/apply-signature", methods=["POST"])
@@ -1039,9 +1166,12 @@ def outreach_send_batch():
     cv_path  = UPLOAD_DIR / "cv.pdf"
 
     def generate():
-        remaining = _cooldown_remaining()
-        if remaining > 0:
-            yield f"data: {json.dumps({'error': 'cooldown', 'remaining_secs': remaining})}\n\n"
+        stats = _session_stats()
+        if stats["cooldown_secs_left"] > 0:
+            yield f"data: {json.dumps({'error': 'cooldown', 'remaining_secs': stats['cooldown_secs_left']})}\n\n"
+            return
+        if stats["remaining"] == 0:
+            yield f"data: {json.dumps({'error': 'cooldown', 'remaining_secs': 1})}\n\n"
             return
         if not cv_path.exists():
             yield f"data: {json.dumps({'error': 'No CV uploaded'})}\n\n"
@@ -1078,8 +1208,16 @@ def outreach_send_batch():
             return
 
         global _stop_flag
-        _stop_flag = False
-        _save_batch_timestamp()
+        _stop_flag   = False
+        smtp_limited = False
+        # Cap batch size to what's left in this session
+        session_remaining = _session_stats()["remaining"]
+        batch = batch[:session_remaining]
+        total = len(batch)
+        if total == 0:
+            yield f"data: {json.dumps({'error': 'No prepared letters ready — run Prepare first.'})}\n\n"
+            conn.close()
+            return
         yield f"data: {json.dumps({'step': 'start', 'total': total})}\n\n"
 
         candidate_name = cv.get('name') or sender.split('@')[0]
@@ -1105,6 +1243,12 @@ def outreach_send_batch():
                     reply_to        = reply_to,
                 )
 
+                # Gmail SMTP rate limit — stop the batch, don't lock cooldown
+                if err == 'DAILY_LIMIT_EXCEEDED':
+                    yield f"data: {json.dumps({'step': 'smtp_limited', 'index': i+1, 'sent': sent_count})}\n\n"
+                    smtp_limited = True
+                    break
+
                 status = 'sent' if ok else 'failed'
                 conn.execute(
                     "UPDATE outreach SET status=?, sent_at=?, error=? WHERE id=?",
@@ -1113,11 +1257,12 @@ def outreach_send_batch():
                 conn.commit()
                 if ok:
                     sent_count += 1
+                    _record_sent(1)
 
                 yield f"data: {json.dumps({'step': 'done', 'index': i+1, 'total': total, 'company': contact['company'], 'status': status, 'error': err})}\n\n"
 
-                # Keep-alive NOOP every 50 emails to prevent idle timeout
-                if ok and sent_count % 50 == 0:
+                # Keep-alive NOOP every 20 emails to prevent idle timeout
+                if ok and sent_count % 20 == 0:
                     try:
                         smtp_server.noop()
                     except Exception:
@@ -1134,11 +1279,15 @@ def outreach_send_batch():
                 pass
             conn.close()
 
-        yield f"data: {json.dumps({'step': 'finished', 'total': total, 'sent': sent_count})}\n\n"
+        if not smtp_limited:
+            yield f"data: {json.dumps({'step': 'finished', 'total': total, 'sent': sent_count})}\n\n"
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+
+# Start response auto-scanner background thread
+threading.Thread(target=_run_response_loop, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, threaded=True)

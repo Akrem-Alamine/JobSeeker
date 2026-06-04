@@ -88,16 +88,25 @@
 <div class="card mb-4">
   <div class="card-header"><i class="bi bi-send-fill me-2"></i>Send Letters</div>
   <div class="card-body">
+    <!-- Session quota counter -->
+    <div id="sessionCounter" style="margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="font-size:12px; color:#8b949e;">Session quota &nbsp;·&nbsp; <span id="sessionSent">0</span> sent &nbsp;·&nbsp; <span id="sessionLeft" style="color:#3fb950; font-weight:600;">1500</span> remaining</span>
+        <span style="font-size:11px; color:#8b949e;">limit: 1500 / session</span>
+      </div>
+      <div class="progress" style="height:5px;">
+        <div id="sessionBar" class="progress-bar bg-success" style="width:0%; transition:width .4s;"></div>
+      </div>
+    </div>
+
+    <!-- Cooldown block -->
     <div id="batchCooldown" style="display:none; margin-bottom:14px;">
       <div style="background:#2d2000; border:1px solid #6e4a00; border-radius:8px; padding:14px 18px; display:flex; align-items:center; gap:14px;">
         <i class="bi bi-clock-history" style="font-size:1.4rem; color:#d29922;"></i>
-        <div style="flex:1;">
-          <div style="font-size:11px; color:#d29922; text-transform:uppercase; letter-spacing:.05em; font-weight:700;">Next batch available in</div>
+        <div>
+          <div style="font-size:11px; color:#d29922; text-transform:uppercase; letter-spacing:.05em; font-weight:700;">1500-email limit reached — next session in</div>
           <div id="cdTime" style="font-size:1.8rem; font-weight:700; color:#d29922; font-variant-numeric:tabular-nums; letter-spacing:.04em;">—</div>
         </div>
-        <button class="btn btn-sm btn-outline-warning" onclick="resetCooldown()">
-          <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
-        </button>
       </div>
     </div>
 
@@ -147,15 +156,6 @@
                style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
         <div class="mt-1" style="font-size:11px; color:#8b949e;">
           Gmail → Account → Security → 2-Step → App passwords
-        </div>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label text-secondary" style="font-size:12px;">REPLY-TO ADDRESS <span style="color:#8b949e;">(optional)</span></label>
-        <input id="replyTo" type="email" class="form-control form-control-sm"
-               placeholder="replies@example.com"
-               style="background:#0d1117; border-color:#30363d; color:#e6edf3;">
-        <div class="mt-1" style="font-size:11px; color:#8b949e;">
-          Where recipients' replies are directed
         </div>
       </div>
       <div class="col-md-3 d-flex align-items-end gap-2">
@@ -405,8 +405,6 @@ async function testEmail() {
   if (j.ok) {
     localStorage.setItem('outreach_email', email);
     localStorage.setItem('outreach_password', pass);
-    const replyTo = document.getElementById('replyTo').value.trim();
-    if (replyTo) localStorage.setItem('outreach_reply_to', replyTo);
     el.textContent = '✓ Connected & saved'; el.style.color = '#3fb950';
   } else {
     el.textContent = '✗ ' + j.error; el.style.color = '#f85149';
@@ -414,19 +412,16 @@ async function testEmail() {
 }
 
 (function loadSavedConfig() {
-  const email   = localStorage.getItem('outreach_email');
-  const pass    = localStorage.getItem('outreach_password');
-  const replyTo = localStorage.getItem('outreach_reply_to');
-  if (email)   document.getElementById('senderEmail').value = email;
-  if (pass)    document.getElementById('senderPassword').value = pass;
-  document.getElementById('replyTo').value = replyTo || 'akrem.alamine+outreach@etudiant-fst.utm.tn';
+  const email = localStorage.getItem('outreach_email');
+  const pass  = localStorage.getItem('outreach_password');
+  if (email) document.getElementById('senderEmail').value = email;
+  if (pass)  document.getElementById('senderPassword').value = pass;
 })();
 
 function startSending() {
   if (selectedIds.size === 0) { alert('Select at least one contact'); return; }
-  const email   = document.getElementById('senderEmail').value.trim();
-  const pass    = document.getElementById('senderPassword').value.trim();
-  const replyTo = document.getElementById('replyTo').value.trim();
+  const email = document.getElementById('senderEmail').value.trim();
+  const pass  = document.getElementById('senderPassword').value.trim();
   if (!email || !pass) { alert('Enter your Gmail and app password first'); return; }
   if (!confirm(`Send ${selectedIds.size} application emails?`)) return;
 
@@ -438,7 +433,7 @@ function startSending() {
 
   fetch('/outreach/send', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({email, password: pass, reply_to: replyTo, contact_ids: [...selectedIds]})
+    body: JSON.stringify({email, password: pass, contact_ids: [...selectedIds]})
   }).then(resp => {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -544,7 +539,18 @@ let _cdTimer = null;
 async function checkCooldown() {
   const r = await fetch('/outreach/cooldown');
   const d = await r.json();
+  updateSessionBar(d.sent, d.remaining);
   startCooldown(d.remaining_secs);
+}
+
+function updateSessionBar(sent, remaining) {
+  const el = document.getElementById('sessionCounter');
+  if (!el) return;
+  const pct = Math.min(100, Math.round((sent / 1500) * 100));
+  el.querySelector('#sessionSent').textContent = (sent || 0).toLocaleString();
+  el.querySelector('#sessionLeft').textContent = (remaining || 0).toLocaleString();
+  el.querySelector('#sessionBar').style.width = pct + '%';
+  el.querySelector('#sessionBar').className = 'progress-bar ' + (pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-success');
 }
 
 function startCooldown(secs) {
@@ -559,7 +565,12 @@ function startCooldown(secs) {
   _cdTimer = setInterval(() => {
     remaining--;
     document.getElementById('cdTime').textContent = fmtCd(remaining);
-    if (remaining <= 0) { clearInterval(_cdTimer); box.style.display = 'none'; btn.disabled = false; }
+    if (remaining <= 0) {
+      clearInterval(_cdTimer);
+      box.style.display = 'none';
+      btn.disabled = false;
+      checkCooldown(); // refresh counter after cooldown ends
+    }
   }, 1000);
 }
 
@@ -576,18 +587,11 @@ async function stopBatch() {
   document.getElementById('batchStopBtn').textContent = 'Stopping…';
 }
 
-async function resetCooldown() {
-  if (!confirm('Reset the cooldown? You will be able to send a new batch immediately.')) return;
-  await fetch('/outreach/cooldown/reset', { method: 'POST' });
-  startCooldown(0);
-}
-
 function startBatchSend() {
   const limit   = parseInt(document.getElementById('batchSizeInput').value, 10);
   if (!limit || limit < 1) { alert('Enter a valid number of emails to send.'); return; }
   const email   = document.getElementById('senderEmail').value.trim();
-  const pass    = document.getElementById('senderPassword').value.trim();
-  const replyTo = document.getElementById('replyTo').value.trim();
+  const pass = document.getElementById('senderPassword').value.trim();
   if (!email || !pass) { alert('Enter your Gmail and app password in the Configuration section first.'); return; }
   if (!confirm(`Send up to ${limit.toLocaleString()} prepared emails?`)) return;
 
@@ -609,7 +613,7 @@ function startBatchSend() {
   fetch('/outreach/send-batch', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({email, password: pass, limit, reply_to: replyTo})
+    body: JSON.stringify({email, password: pass, limit})
   }).then(resp => {
     const reader  = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -629,6 +633,13 @@ function startBatchSend() {
             btn.disabled = false; stopBtn.style.display = 'none';
             return;
           }
+          if (d.step === 'smtp_limited') {
+            log.textContent += `\n⚠ Gmail daily SMTP limit reached after ${d.sent} emails.\nThis is Gmail's 2,000 emails/day cap — different from the web interface quota.\nResets at midnight Pacific Time. Manual web sends still work.\n`;
+            label.textContent = 'Gmail daily SMTP limit reached — resets at midnight Pacific Time.';
+            btn.disabled = false; stopBtn.style.display = 'none';
+            table.ajax.reload();
+            return;
+          }
           if (d.step === 'start') {
             total = d.total;
             label.textContent = `Sending ${total.toLocaleString()} emails…`;
@@ -641,6 +652,15 @@ function startBatchSend() {
             const el = document.getElementById('statReady');
             const cur = parseInt(el.textContent.replace(/,/g,'')) || 0;
             if (d.status === 'sent' && cur > 0) el.textContent = (cur - 1).toLocaleString();
+            // refresh session counter
+            if (d.status === 'sent') {
+              const sl = document.getElementById('sessionLeft');
+              const ss = document.getElementById('sessionSent');
+              const left = Math.max(0, (parseInt(sl.textContent.replace(/,/g,'')) || 0) - 1);
+              const sent = (parseInt(ss.textContent.replace(/,/g,'')) || 0) + 1;
+              updateSessionBar(sent, left);
+              if (left === 0) { checkCooldown(); }
+            }
           } else if (d.step === 'stopped') {
             log.textContent += `\nStopped after ${d.index} emails.\n`;
             label.textContent = 'Stopped.';
@@ -650,7 +670,7 @@ function startBatchSend() {
             log.textContent += `\nDone — ${d.sent} sent out of ${d.total}.\n`;
             label.textContent = `Batch complete — ${d.sent} sent.`;
             btn.disabled = false; stopBtn.style.display = 'none';
-            startCooldown(86400);
+            checkCooldown();
             table.ajax.reload();
           }
           log.scrollTop = log.scrollHeight;
